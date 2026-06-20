@@ -1,0 +1,27 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Inicio — {{ agencia.nombre }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">Inicio</h1>
+  <p class="page-subtitle">{{ agencia.nombre }}</p>
+</div>
+
+<div class="grid w-full gap-4 sm:grid-cols-2 lg:grid-cols-4 lg:gap-5">
+  <a href="/dashboard/{{ agencia.id }}/inventario" class="kpi-card">
+    <p class="kpi-value">{{ total_autos }}</p>
+    <p class="kpi-label">Total stock</p>
+  </a>
+  <a href="/dashboard/{{ agencia.id }}/inventario?estado=disponible" class="kpi-card">
+    <p class="kpi-value">{{ disponibles }}</p>
+    <p class="kpi-label">Disponibles</p>
+  </a>
+  <a href="/dashboard/{{ agencia.id }}/leads" class="kpi-card">
+    <p class="kpi-value">{{ total_leads }}</p>
+    <p class="kpi-label">Leads</p>
+  </a>
+  <a href="/dashboard/{{ agencia.id }}/citas" class="kpi-card">
+    <p class="kpi-value">{{ citas_hoy }}</p>
+    <p class="kpi-label">Citas hoy</p>
+  </a>
+</div>
+{% endblock %}

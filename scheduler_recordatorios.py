@@ -1,0 +1,4 @@
+from scheduler_tareas import detener_schedulers, iniciar_schedulers
+
+detener_scheduler_recordatorios = detener_schedulers
+iniciar_scheduler_recordatorios = iniciar_schedulers

@@ -1,0 +1,17 @@
+{% extends "auth/base.html" %}
+{% block title %}Revisá tu correo{% endblock %}
+{% block content %}
+<div class="ui-card p-6 text-center">
+  <div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl"
+       style="background: color-mix(in srgb, var(--brand) 15%, var(--card)); border: 1px solid color-mix(in srgb, var(--brand) 25%, var(--border));">
+    <svg class="h-7 w-7" style="color: #93c5fd" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+    </svg>
+  </div>
+  <h1 class="text-lg font-semibold" style="color: var(--title);">Revisá tu correo</h1>
+  <p class="mt-2 text-sm leading-relaxed" style="color: var(--muted);">
+    Te enviamos un enlace para confirmar tu cuenta. Una vez verificado, podés iniciar sesión con verificación por WhatsApp.
+  </p>
+  <a href="/auth/login" class="btn-primary mt-6 inline-block text-center no-underline">Ir a iniciar sesión</a>
+</div>
+{% endblock %}

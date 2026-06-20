@@ -1,0 +1,167 @@
+{% extends "dashboard/base.html" %}
+{% from "dashboard/macros.html" import empty_state %}
+{% block title %}Inventario — {{ agencia.nombre }}{% endblock %}
+{% block content %}
+<div class="page-header flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+  <div>
+    <h1 class="page-title">Inventario</h1>
+    {% if request.query_params.get('estado') == 'disponible' %}
+    <p class="page-subtitle">{{ disponibles }} vehículos disponibles · {{ total_stock }} en stock</p>
+    {% else %}
+    <p class="page-subtitle">{{ total_stock }} vehículos en stock</p>
+    {% endif %}
+  </div>
+  <a href="/dashboard/{{ agencia.id }}/inventario/nuevo" class="btn-primary shrink-0">
+    + Agregar vehículo
+  </a>
+</div>
+
+{% elif request.query_params.get('error') %}
+<div class="ui-card mb-4 px-4 py-3 text-sm" style="color: #fca5a5;">
+  {% if request.query_params.get('error') == 'formato' %}Solo se admite CSV.{% else %}No se pudo importar el archivo.{% endif %}
+</div>
+{% endif %}
+
+<form id="form-importar-stock" method="post" action="/dashboard/{{ agencia.id }}/inventario/importar" enctype="multipart/form-data" class="mb-5">
+  <input id="input-importar-csv" type="file" name="archivo" accept=".csv,.txt,text/csv" class="hidden">
+  <div id="zona-importar" class="ui-card cursor-pointer px-5 py-5 text-center transition hover:border-brand/40">
+    <div id="zona-importar-idle">
+      <p class="text-sm font-medium" style="color: var(--title);">Arrastrá tu CSV o hacé clic para importar</p>
+      <p class="mt-1 text-xs" style="color: var(--muted);">Detección automática de columnas</p>
+    </div>
+    <div id="zona-importar-cargando" class="hidden">
+      <p class="text-sm font-medium text-brand">Importando vehículos...</p>
+    </div>
+  </div>
+</form>
+
+{% if autos %}
+<div class="relative mb-4 w-full">
+  <input id="buscador-inventario" type="search" autocomplete="off"
+         placeholder="Buscar marca, modelo o patente..."
+         class="w-full rounded-md px-4 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand"
+         style="background: var(--card); border: 1px solid var(--border); color: var(--title);">
+</div>
+
+<div class="ui-card w-full overflow-hidden p-1 sm:p-2">
+<div class="overflow-x-auto">
+  <table class="inv-table w-full border-separate" style="border-spacing: 0 0.625rem;">
+    <thead>
+      <tr>
+        <th class="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider" style="color: var(--muted);">Vehículo</th>
+        <th class="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wider" style="color: var(--muted);">Año</th>
+        <th class="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wider" style="color: var(--muted);">Precio</th>
+        <th class="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider" style="color: var(--muted);">Estado</th>
+      </tr>
+    </thead>
+    <tbody id="tabla-inventario">
+      {% for auto in autos %}
+      <tr class="fila-inventario inv-row"
+          data-marca="{{ auto.marca|lower }}"
+          data-modelo="{{ auto.modelo|lower }}"
+          data-patente="{{ auto.patente|lower }}"
+          data-estado="{{ auto.estado|lower }}">
+        <td class="inv-cell inv-cell-l px-5 py-5">
+          <a href="/dashboard/{{ agencia.id }}/inventario/{{ auto.id }}/editar" class="text-[15px] font-semibold leading-snug hover:underline" style="color: var(--title);">
+            {{ auto.marca }} {{ auto.modelo }}
+          </a>
+          {% if auto.version or auto.patente %}
+          <p class="mt-1 text-sm leading-relaxed" style="color: var(--muted);">{{ auto.version }}{% if auto.patente %} · {{ auto.patente }}{% endif %}</p>
+          {% endif %}
+        </td>
+        <td class="inv-cell px-5 py-5 text-right text-[15px] tabular-nums" style="color: var(--title);">{{ auto.ano }}</td>
+        <td class="inv-cell px-5 py-5 text-right text-[15px] font-semibold tabular-nums" style="color: var(--title);">${{ "{:,.0f}".format(auto.precio_referencia_ars) }}</td>
+        <td class="inv-cell inv-cell-r px-5 py-5">
+          {% set estado_lower = auto.estado|lower %}
+          <span class="estado-badge {% if estado_lower == 'disponible' %}estado-disponible{% elif estado_lower == 'reservado' %}estado-reservado{% elif estado_lower == 'vendido' %}estado-vendido{% else %}estado-otro{% endif %}">
+            {{ auto.estado }}
+          </span>
+        </td>
+      </tr>
+      {% endfor %}
+      <tr id="sin-resultados-inventario" class="hidden">
+        <td colspan="4" class="p-0">
+          {{ empty_state('No se encontraron vehículos', 'Probá con otra búsqueda o quitá el filtro de estado.', 'search') }}
+        </td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+</div>
+{% else %}
+<div class="ui-card">
+  {{ empty_state('No hay vehículos en stock', 'Agregá un vehículo manualmente o importá tu inventario desde un archivo CSV.', 'car') }}
+</div>
+{% endif %}
+
+<style>
+  .inv-row .inv-cell {
+    background: color-mix(in srgb, var(--card) 96%, var(--surface));
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    transition: background-color 0.15s ease;
+  }
+  .inv-row .inv-cell-l { border-left: 1px solid var(--border); border-radius: 0.5rem 0 0 0.5rem; }
+  .inv-row .inv-cell-r { border-right: 1px solid var(--border); border-radius: 0 0.5rem 0.5rem 0; }
+  .inv-row:hover .inv-cell { background: color-mix(in srgb, var(--card) 80%, var(--title)); }
+</style>
+
+<script>
+  (function () {
+    const form = document.getElementById('form-importar-stock');
+    const input = document.getElementById('input-importar-csv');
+    const zona = document.getElementById('zona-importar');
+    const idle = document.getElementById('zona-importar-idle');
+    const cargando = document.getElementById('zona-importar-cargando');
+
+    if (form && input && zona) {
+      function enviarArchivo(file) {
+        if (!file) return;
+        const dt = new DataTransfer();
+        dt.items.add(file);
+        input.files = dt.files;
+        idle.classList.add('hidden');
+        cargando.classList.remove('hidden');
+        zona.classList.add('pointer-events-none', 'opacity-70');
+        form.submit();
+      }
+      zona.addEventListener('click', function () { input.click(); });
+      input.addEventListener('change', function () { enviarArchivo(input.files[0]); });
+      zona.addEventListener('dragover', function (e) { e.preventDefault(); });
+      zona.addEventListener('drop', function (e) {
+        e.preventDefault();
+        enviarArchivo(e.dataTransfer.files[0]);
+      });
+    }
+
+    const buscador = document.getElementById('buscador-inventario');
+    const filas = document.querySelectorAll('.fila-inventario');
+    const aviso = document.getElementById('sin-resultados-inventario');
+    if (!filas.length) return;
+
+    const filtroEstado = new URLSearchParams(window.location.search).get('estado');
+    if (filtroEstado === 'disponible' && buscador) {
+      buscador.placeholder = 'Filtrando disponibles…';
+    }
+
+    function aplicarFiltros() {
+      const palabras = buscador
+        ? buscador.value.trim().toLowerCase().split(/\s+/).filter(Boolean)
+        : [];
+      let visibles = 0;
+      filas.forEach(function (fila) {
+        const texto = [fila.dataset.marca, fila.dataset.modelo, fila.dataset.patente].join(' ');
+        const coincideTexto = !palabras.length || palabras.every(function (p) { return texto.includes(p); });
+        const coincideEstado = !filtroEstado || fila.dataset.estado === filtroEstado.toLowerCase();
+        const coincide = coincideTexto && coincideEstado;
+        fila.classList.toggle('hidden', !coincide);
+        if (coincide) visibles++;
+      });
+      if (aviso) aviso.classList.toggle('hidden', visibles > 0);
+    }
+
+    if (buscador) buscador.addEventListener('input', aplicarFiltros);
+    aplicarFiltros();
+  })();
+</script>
+{% endblock %}

@@ -1,0 +1,243 @@
+{% extends "dashboard/base.html" %}
+{% from "dashboard/macros.html" import empty_state %}
+{% block title %}{% if auto %}Editar{% else %}Nuevo{% endif %} vehículo — {{ agencia.nombre }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <a href="/dashboard/{{ agencia.id }}/inventario" class="text-sm hover:opacity-90" style="color: var(--muted);">← Volver al inventario</a>
+  <h1 class="page-title mt-2">{% if auto %}Editar vehículo{% else %}Nuevo vehículo{% endif %}</h1>
+</div>
+
+<div class="grid gap-4 lg:grid-cols-2 lg:gap-5">
+  <form id="form-vehiculo" method="post"
+        action="{% if auto %}/dashboard/{{ agencia.id }}/inventario/{{ auto.id }}/editar{% else %}/dashboard/{{ agencia.id }}/inventario/nuevo{% endif %}"
+        class="ui-card js-save-form space-y-4 p-5 sm:p-6" novalidate>
+    <h2 class="text-base font-semibold" style="color: var(--title);">Datos del vehículo</h2>
+
+    <div class="grid gap-4 sm:grid-cols-2">
+      <label class="block">
+        <span class="ui-label">Marca *</span>
+        <input name="marca" required value="{{ auto.marca if auto else '' }}" class="ui-input">
+      </label>
+      <label class="block">
+        <span class="ui-label">Modelo *</span>
+        <input name="modelo" required value="{{ auto.modelo if auto else '' }}" class="ui-input">
+      </label>
+      <label class="block">
+        <span class="ui-label">Versión</span>
+        <input name="version" value="{{ auto.version if auto else '' }}" class="ui-input">
+      </label>
+      <label class="block">
+        <span class="ui-label">Año *</span>
+        <input name="ano" type="number" required min="1990" max="2030" value="{{ auto.ano if auto else '' }}" class="ui-input">
+      </label>
+      <label class="block">
+        <span class="ui-label">Tipo</span>
+        <input name="tipo" value="{{ auto.tipo if auto else 'Sedan' }}" class="ui-input">
+      </label>
+      <label class="block">
+        <span class="ui-label">Patente</span>
+        <input name="patente" value="{{ auto.patente if auto else '' }}" class="ui-input">
+      </label>
+      <label class="block">
+        <span class="ui-label">Precio (ARS) *</span>
+        <input name="precio" type="number" required step="0.01" value="{{ auto.precio_referencia_ars if auto else '' }}" class="ui-input">
+      </label>
+      <label class="block">
+        <span class="ui-label">Estado</span>
+        <select name="estado" class="ui-select">
+          {% for e in ['Disponible', 'Reservado', 'Vendido'] %}
+          <option value="{{ e }}" {% if auto and auto.estado == e %}selected{% endif %}>{{ e }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+
+    <button id="btn-guardar-vehiculo" type="submit" class="btn-primary w-full py-2.5"
+            data-saving-text="Guardando...">
+      {% if auto %}Guardar cambios{% else %}Crear vehículo{% endif %}
+    </button>
+  </form>
+
+  {% if auto %}
+  <div class="space-y-4">
+    <section class="ui-card relative p-5 sm:p-6">
+      <h2 class="text-base font-semibold" style="color: var(--title);">Fotos de preventa</h2>
+      <p class="page-subtitle mt-1">El bot enviará estas imágenes cuando el cliente las pida por WhatsApp.</p>
+
+      <div id="upload-overlay" class="pointer-events-none absolute inset-0 z-20 hidden items-center justify-center rounded-[0.625rem] backdrop-blur-sm"
+           style="background: color-mix(in srgb, var(--surface) 55%, transparent);">
+        <div class="flex flex-col items-center gap-3">
+          <span class="form-spinner lg"></span>
+          <p class="text-sm font-medium" style="color: var(--title);">Subiendo fotos...</p>
+        </div>
+      </div>
+
+      <div id="galeria-fotos" class="relative mt-4 grid grid-cols-2 gap-3">
+        {% for foto in fotos if foto and foto.strip() %}
+        {% set es_portada = foto_portada and foto == foto_portada %}
+        <div class="foto-card group relative overflow-hidden rounded-xl
+                    {% if es_portada %}border-2 border-brand ring-2 ring-brand/30
+                    {% else %}border border-[var(--border)]{% endif %}"
+             style="background: var(--surface);">
+          {% if es_portada %}
+          <span class="absolute left-2 top-2 z-10 rounded-md bg-brand px-2 py-1 text-xs font-semibold text-white shadow">Portada</span>
+          {% endif %}
+          <img src="{{ foto }}" alt="Foto preventa" loading="lazy" class="aspect-video w-full object-cover" onerror="quitarFotoRota(this)">
+          <form method="post" action="/dashboard/{{ agencia.id }}/inventario/{{ auto.id }}/fotos/eliminar"
+                class="form-eliminar absolute right-2 top-2 z-10" onsubmit="return confirm('¿Eliminar esta foto?')">
+            <input type="hidden" name="foto_url" value="{{ foto }}">
+            <button type="submit" class="rounded bg-red-600/90 px-2 py-1 text-xs font-medium text-white shadow hover:bg-red-500">Eliminar</button>
+          </form>
+          {% if not es_portada %}
+          <form method="post" action="/dashboard/{{ agencia.id }}/inventario/{{ auto.id }}/fotos/portada" class="form-portada absolute bottom-2 left-2 right-2 z-10">
+            <input type="hidden" name="foto_url" value="{{ foto }}">
+            <button type="submit" class="w-full rounded-md px-2 py-1.5 text-xs font-medium shadow backdrop-blur transition hover:opacity-90"
+                    style="background: color-mix(in srgb, var(--surface) 88%, transparent); color: #fcd34d;">
+              Definir como portada
+            </button>
+          </form>
+          {% endif %}
+        </div>
+        {% else %}
+        <div id="sin-fotos" class="col-span-2">
+          {{ empty_state('Sin fotos cargadas', 'Subí imágenes JPG, PNG o WebP. Podés elegir varias a la vez.', 'inbox') }}
+        </div>
+        {% endfor %}
+      </div>
+
+      <div class="mt-4">
+        <input id="input-fotos" type="file" accept="image/*" multiple class="hidden">
+        <button type="button" id="btn-subir-fotos" class="btn-upload">
+          <svg class="h-4 w-4 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+          <span id="btn-subir-fotos-texto">Subir fotos</span>
+        </button>
+        <div id="fotos-estado" class="upload-status hidden">
+          <span class="form-spinner"></span>
+          <span id="fotos-estado-texto">Subiendo...</span>
+        </div>
+      </div>
+    </section>
+
+    <form method="post" action="/dashboard/{{ agencia.id }}/inventario/{{ auto.id }}/eliminar"
+          onsubmit="return confirm('¿Eliminar este vehículo?')">
+      <button type="submit" class="w-full rounded-xl border py-2 text-sm transition hover:opacity-90"
+              style="border-color: rgba(248,113,113,0.35); color: #fca5a5;">
+        Eliminar vehículo
+      </button>
+    </form>
+  </div>
+
+  <script>
+    (function () {
+      const AGENCIA_ID = {{ agencia.id }};
+      const AUTO_ID = {{ auto.id }};
+      const UPLOAD_URL = '/dashboard/' + AGENCIA_ID + '/inventario/' + AUTO_ID + '/fotos/upload';
+      const BASE_ACTION = '/dashboard/' + AGENCIA_ID + '/inventario/' + AUTO_ID;
+
+      const galeria = document.getElementById('galeria-fotos');
+      const overlay = document.getElementById('upload-overlay');
+      const inputFotos = document.getElementById('input-fotos');
+      const btnSubir = document.getElementById('btn-subir-fotos');
+      const btnTexto = document.getElementById('btn-subir-fotos-texto');
+      const estadoWrap = document.getElementById('fotos-estado');
+      const estadoTexto = document.getElementById('fotos-estado-texto');
+
+      function escAttr(v) {
+        return String(v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+      }
+
+      function quitarSinFotos() {
+        const aviso = document.getElementById('sin-fotos');
+        if (aviso) aviso.remove();
+      }
+
+      function cardHtml(foto, portada) {
+        const esPortada = portada && foto === portada;
+        const badge = esPortada
+          ? '<span class="absolute left-2 top-2 z-10 rounded-md bg-brand px-2 py-1 text-xs font-semibold text-white shadow">Portada</span>'
+          : '';
+        const portadaBtn = esPortada ? '' : (
+          '<form method="post" action="' + BASE_ACTION + '/fotos/portada" class="form-portada absolute bottom-2 left-2 right-2 z-10">' +
+          '<input type="hidden" name="foto_url" value="' + escAttr(foto) + '">' +
+          '<button type="submit" class="w-full rounded-md px-2 py-1.5 text-xs font-medium shadow backdrop-blur transition hover:opacity-90" style="background:color-mix(in srgb,var(--surface) 88%,transparent);color:#fcd34d;">Definir como portada</button></form>'
+        );
+        const border = esPortada
+          ? 'border-2 border-brand ring-2 ring-brand/30'
+          : 'border border-[var(--border)]';
+        return (
+          '<div class="foto-card group relative overflow-hidden rounded-xl ' + border + '" style="background:var(--surface);">' +
+          badge +
+          '<img src="' + escAttr(foto) + '" alt="Foto preventa" loading="lazy" class="aspect-video w-full object-cover" onerror="quitarFotoRota(this)">' +
+          '<form method="post" action="' + BASE_ACTION + '/fotos/eliminar" class="form-eliminar absolute right-2 top-2 z-10" onsubmit="return confirm(\'¿Eliminar esta foto?\')">' +
+          '<input type="hidden" name="foto_url" value="' + escAttr(foto) + '">' +
+          '<button type="submit" class="rounded bg-red-600/90 px-2 py-1 text-xs font-medium text-white shadow hover:bg-red-500">Eliminar</button></form>' +
+          portadaBtn + '</div>'
+        );
+      }
+
+      function renderGaleria(fotos, portada) {
+        const validas = (fotos || []).filter(function (f) { return f && String(f).trim(); });
+        if (!validas.length) {
+          galeria.innerHTML = '<div id="sin-fotos" class="col-span-2"><div class="empty-state"><div class="empty-state-icon" aria-hidden="true"><svg class="h-7 w-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/></svg></div><p class="empty-state-title">Sin fotos cargadas</p><p class="empty-state-text">Subí imágenes JPG, PNG o WebP. Podés elegir varias a la vez.</p></div></div>';
+          return;
+        }
+        galeria.innerHTML = validas.map(function (f) { return cardHtml(f, portada); }).join('');
+      }
+
+      async function quitarFotoRota(img) {
+        const card = img.closest('.foto-card');
+        if (!card) return;
+        const form = card.querySelector('form.form-eliminar');
+        if (form) {
+          try {
+            await fetch(form.action, { method: 'POST', body: new FormData(form), redirect: 'manual' });
+          } catch (_) {}
+        }
+        card.remove();
+        if (!galeria.querySelector('.foto-card')) {
+          renderGaleria([], null);
+        }
+      }
+      window.quitarFotoRota = quitarFotoRota;
+
+      function setCargando(activo, texto) {
+        overlay.classList.toggle('hidden', !activo);
+        overlay.classList.toggle('flex', activo);
+        btnSubir.disabled = activo;
+        estadoWrap.classList.toggle('hidden', !activo);
+        if (texto) estadoTexto.textContent = texto;
+      }
+
+      async function subirFotos(fileList) {
+        if (!fileList || !fileList.length) return;
+        setCargando(true, 'Subiendo fotos...');
+        const fd = new FormData();
+        Array.from(fileList).forEach(function (f) { fd.append('archivos', f); });
+        try {
+          const res = await fetch(UPLOAD_URL, {
+            method: 'POST',
+            body: fd,
+            headers: { 'X-Upload-Async': '1' },
+          });
+          const data = await res.json();
+          if (!res.ok || !data.ok) throw new Error((data && (data.error || data.detail)) || 'error');
+          renderGaleria(data.fotos, data.portada);
+          window.DashboardUI.showToast(data.subidas + ' foto(s) subida(s) correctamente.');
+          btnTexto.textContent = fileList.length === 1 ? fileList[0].name : fileList.length + ' archivos subidos';
+        } catch (_) {
+          window.DashboardUI.showToast('No se pudieron subir las fotos. Revisá el formato (JPG, PNG, WebP).', 'error');
+        } finally {
+          setCargando(false);
+          inputFotos.value = '';
+        }
+      }
+
+      btnSubir.addEventListener('click', function () { inputFotos.click(); });
+      inputFotos.addEventListener('change', function () {
+        if (inputFotos.files && inputFotos.files.length) subirFotos(inputFotos.files);
+      });
+    })();
+  </script>
+  {% endif %}
+</div>
+{% endblock %}

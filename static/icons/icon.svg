@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Bot Agencias">
+  <rect width="512" height="512" rx="96" fill="#0f172a"/>
+  <rect x="64" y="64" width="384" height="384" rx="72" fill="#1e293b" stroke="#334155" stroke-width="8"/>
+  <path d="M160 320V192h48c44 0 72 28 72 64s-28 64-72 64h-48zm48-32h8c20 0 32-10 32-24s-12-24-32-24h-8v48z" fill="#3B82F6"/>
+  <circle cx="352" cy="256" r="40" fill="#3B82F6" opacity="0.9"/>
+</svg>

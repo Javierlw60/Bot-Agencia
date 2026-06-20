@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="es" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>{% block title %}{{ agencia.nombre }}{% endblock %} · Panel</title>
+  <link rel="manifest" href="/dashboard/{{ agencia.id }}/manifest.webmanifest">
+  <meta name="theme-color" content="{{ color_primario or '#3B82F6' }}">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="{{ agencia.nombre }}">
+  {% if agencia.logo_url %}
+  <link rel="apple-touch-icon" href="{{ agencia.logo_url }}">
+  {% else %}
+  <link rel="apple-touch-icon" href="/static/icons/icon.svg">
+  {% endif %}
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: 'var(--brand)',
+            surface: '#0f172a',
+            card: '#1e293b',
+            border: '#334155',
+            title: '#f8fafc',
+            muted: '#94a3b8',
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    :root {
+      --brand: {{ color_primario or '#3B82F6' }};
+      --surface: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --title: #f8fafc;
+      --muted: #94a3b8;
+    }
+    body {
+      background-color: var(--surface);
+      color: var(--title);
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    }
+    .bg-brand { background-color: var(--brand); }
+    .text-brand { color: var(--brand); }
+    .border-brand { border-color: var(--brand); }
+    .ui-card {
+      background: linear-gradient(155deg,
+        color-mix(in srgb, var(--card) 92%, var(--title)) 0%,
+        var(--card) 50%,
+        color-mix(in srgb, var(--card) 96%, var(--surface)) 100%);
+      border: 1px solid var(--border);
+      border-radius: 0.625rem;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    }
+    .page-container {
+      max-width: 1200px;
+      margin-left: auto;
+      margin-right: auto;
+      padding: 1.25rem 1.5rem 1.75rem;
+      width: 100%;
+    }
+    @media (min-width: 1024px) {
+      .page-container { padding: 1.5rem 2rem 2rem; }
+    }
+    .page-header { margin-bottom: 1.25rem; }
+    .page-title {
+      font-size: 1.25rem;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      color: var(--title);
+    }
+    .page-subtitle {
+      margin-top: 0.25rem;
+      font-size: 0.875rem;
+      line-height: 1.55;
+      color: var(--muted);
+    }
+    .kpi-card {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      min-height: 8.5rem;
+      padding: 1.25rem 1.5rem;
+      background: linear-gradient(160deg,
+        color-mix(in srgb, var(--card) 82%, var(--brand) 6%) 0%,
+        var(--card) 45%,
+        color-mix(in srgb, var(--surface) 55%, var(--card)) 100%);
+      border: 1px solid color-mix(in srgb, var(--border) 80%, var(--brand) 20%);
+      border-radius: 0.625rem;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+      text-decoration: none;
+      transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+    .kpi-card:hover {
+      transform: scale(1.03);
+      border-color: var(--brand);
+      box-shadow: 0 0 0 1px color-mix(in srgb, var(--brand) 40%, transparent),
+                  0 14px 36px color-mix(in srgb, var(--brand) 18%, transparent);
+    }
+    .kpi-card:focus-visible {
+      outline: 2px solid var(--brand);
+      outline-offset: 2px;
+    }
+    .kpi-value {
+      font-size: 2.5rem;
+      font-weight: 700;
+      line-height: 1;
+      letter-spacing: -0.02em;
+      color: var(--title);
+      font-variant-numeric: tabular-nums;
+    }
+    .kpi-label {
+      margin-top: 0.75rem;
+      font-size: 0.8125rem;
+      font-weight: 500;
+      line-height: 1.55;
+      color: #94a3b8;
+    }
+    .kpi-card:hover .kpi-label { color: color-mix(in srgb, #94a3b8 70%, var(--title)); }
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2.5rem 1.5rem;
+      text-align: center;
+    }
+    .empty-state-icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 3.5rem;
+      height: 3.5rem;
+      margin-bottom: 1rem;
+      border-radius: 1rem;
+      background: color-mix(in srgb, var(--brand) 12%, var(--card));
+      border: 1px solid color-mix(in srgb, var(--brand) 22%, var(--border));
+      color: color-mix(in srgb, var(--brand) 65%, var(--muted));
+    }
+    .empty-state-title {
+      font-size: 0.9375rem;
+      font-weight: 600;
+      color: var(--title);
+    }
+    .empty-state-text {
+      margin-top: 0.375rem;
+      max-width: 20rem;
+      font-size: 0.8125rem;
+      line-height: 1.6;
+      color: var(--muted);
+    }
+    .btn-primary {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 0.375rem;
+      padding: 0.5rem 1rem;
+      font-size: 0.875rem;
+      font-weight: 500;
+      color: #fff;
+      background-color: var(--brand);
+      transition: opacity 0.15s ease, transform 0.15s ease;
+    }
+    .btn-primary:hover { opacity: 0.92; transform: translateY(-1px); }
+    .btn-primary:disabled, .btn-primary.is-saving {
+      opacity: 0.65;
+      cursor: not-allowed;
+      transform: none;
+    }
+    .ui-label {
+      display: block;
+      margin-bottom: 0.35rem;
+      font-size: 0.75rem;
+      font-weight: 500;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .ui-input, .ui-select {
+      width: 100%;
+      border-radius: 0.375rem;
+      padding: 0.5rem 0.75rem;
+      font-size: 0.875rem;
+      line-height: 1.45;
+      color: var(--title);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+    .ui-input:focus, .ui-select:focus {
+      outline: none;
+      border-color: color-mix(in srgb, var(--brand) 55%, var(--border));
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 18%, transparent);
+    }
+    .ui-input:invalid:not(:placeholder-shown):not(:focus) {
+      border-color: #f87171;
+    }
+    .btn-upload {
+      display: flex;
+      width: 100%;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      border-radius: 0.375rem;
+      border: 1px dashed var(--border);
+      padding: 0.625rem 0.75rem;
+      font-size: 0.875rem;
+      color: var(--muted);
+      background: var(--surface);
+      transition: border-color 0.15s ease, opacity 0.15s ease;
+    }
+    .btn-upload:hover:not(:disabled) {
+      border-color: color-mix(in srgb, var(--brand) 45%, var(--border));
+      color: var(--title);
+    }
+    .btn-upload:disabled { opacity: 0.6; cursor: wait; }
+    .form-spinner {
+      display: inline-block;
+      width: 1rem;
+      height: 1rem;
+      border: 2px solid var(--border);
+      border-top-color: var(--brand);
+      border-radius: 50%;
+      animation: ui-spin 0.7s linear infinite;
+      flex-shrink: 0;
+    }
+    .form-spinner.lg { width: 1.75rem; height: 1.75rem; border-width: 3px; }
+    @keyframes ui-spin { to { transform: rotate(360deg); } }
+    .upload-status {
+      margin-top: 0.35rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.75rem;
+      color: var(--muted);
+    }
+    #toast-container {
+      position: fixed;
+      top: 1rem;
+      right: 1rem;
+      z-index: 100;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      max-width: min(22rem, calc(100vw - 2rem));
+      pointer-events: none;
+    }
+    .ui-toast {
+      padding: 0.75rem 1rem;
+      border-radius: 0.5rem;
+      font-size: 0.875rem;
+      font-weight: 500;
+      line-height: 1.45;
+      opacity: 0;
+      transform: translateY(-0.5rem);
+      transition: opacity 0.25s ease, transform 0.25s ease;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+      pointer-events: auto;
+    }
+    .ui-toast-visible { opacity: 1; transform: translateY(0); }
+    .ui-toast-success {
+      background: color-mix(in srgb, #064e3b 85%, var(--card));
+      border: 1px solid rgba(16, 185, 129, 0.35);
+      color: #6ee7b7;
+    }
+    .ui-toast-error {
+      background: color-mix(in srgb, #450a0a 85%, var(--card));
+      border: 1px solid rgba(248, 113, 113, 0.35);
+      color: #fca5a5;
+    }
+    .estado-badge {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 9999px;
+      padding: 0.25rem 0.75rem;
+      font-size: 0.75rem;
+      font-weight: 500;
+      letter-spacing: 0.01em;
+      white-space: nowrap;
+    }
+    .estado-disponible {
+      background: rgba(16, 185, 129, 0.14);
+      color: #6ee7b7;
+      border: 1px solid rgba(16, 185, 129, 0.28);
+    }
+    .estado-reservado {
+      background: rgba(245, 158, 11, 0.14);
+      color: #fcd34d;
+      border: 1px solid rgba(245, 158, 11, 0.28);
+    }
+    .estado-vendido {
+      background: rgba(148, 163, 184, 0.12);
+      color: #94a3b8;
+      border: 1px solid rgba(148, 163, 184, 0.25);
+    }
+    .estado-otro {
+      background: rgba(148, 163, 184, 0.1);
+      color: var(--muted);
+      border: 1px solid var(--border);
+    }
+    .table-responsive {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      margin-left: -0.25rem;
+      margin-right: -0.25rem;
+      padding-left: 0.25rem;
+      padding-right: 0.25rem;
+    }
+    #mobile-drawer .drawer-backdrop {
+      position: absolute;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.55);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s ease;
+    }
+    #mobile-drawer.open .drawer-backdrop {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    #mobile-drawer .drawer-panel {
+      position: absolute;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      width: min(16rem, 85vw);
+      display: flex;
+      flex-direction: column;
+      border-right: 1px solid var(--border);
+      background: var(--card);
+      transform: translateX(-100%);
+      transition: transform 0.22s ease;
+      box-shadow: 4px 0 24px rgba(0, 0, 0, 0.35);
+    }
+    #mobile-drawer.open .drawer-panel { transform: translateX(0); }
+    .btn-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 2.5rem;
+      height: 2.5rem;
+      border-radius: 0.375rem;
+      color: var(--title);
+      transition: background 0.15s ease;
+    }
+    .btn-icon:hover { background: color-mix(in srgb, var(--border) 40%, transparent); }
+    @media (max-width: 640px) {
+      .page-container { padding: 1rem 1rem 1.5rem; }
+      .kpi-value { font-size: 2rem; }
+      .kpi-card { min-height: 7.5rem; padding: 1rem 1.25rem; }
+      .page-title { font-size: 1.125rem; }
+    }
+  </style>
+</head>
+<body class="min-h-full antialiased"
+      data-sw-url="/dashboard/{{ agencia.id }}/sw.js"
+      data-pwa-scope="/">
+  {% from "dashboard/_nav.html" import nav_links, nav_brand %}
+  <div class="flex min-h-full">
+    <aside class="hidden w-56 flex-shrink-0 border-r lg:flex lg:flex-col" style="border-color: var(--border); background: var(--card);">
+      {{ nav_brand(agencia) }}
+      <nav class="flex-1 space-y-0.5 p-3">
+        {{ nav_links(agencia, pagina_activa, 'flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition hover:opacity-90') }}
+      </nav>
+      <form method="post" action="/auth/cerrar-sesion" class="border-t p-3" style="border-color: var(--border);">
+        <button type="submit" class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition hover:opacity-90" style="color: var(--muted);">
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
+          Cerrar sesión
+        </button>
+      </form>
+    </aside>
+
+    <div id="mobile-drawer" class="hidden fixed inset-0 z-50 lg:hidden" aria-hidden="true">
+      <div id="drawer-backdrop" class="drawer-backdrop" aria-hidden="true"></div>
+      <aside class="drawer-panel" role="dialog" aria-label="Menú de navegación">
+        <div class="flex items-center justify-between border-b px-4 py-4" style="border-color: var(--border);">
+          <span class="text-sm font-semibold" style="color: var(--title);">Menú</span>
+          <button type="button" id="btn-menu-close" class="btn-icon" aria-label="Cerrar menú">
+            <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+        {{ nav_brand(agencia) }}
+        <nav class="flex-1 space-y-0.5 overflow-y-auto p-3">
+          {{ nav_links(agencia, pagina_activa, 'flex items-center gap-2.5 rounded-md px-3 py-2.5 text-sm font-medium transition hover:opacity-90') }}
+        </nav>
+        <form method="post" action="/auth/cerrar-sesion" class="border-t p-3" style="border-color: var(--border);">
+          <button type="submit" class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition hover:opacity-90" style="color: var(--muted);">
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
+            Cerrar sesión
+          </button>
+        </form>
+      </aside>
+    </div>
+
+    <div class="flex min-w-0 flex-1 flex-col">
+      <header class="sticky top-0 z-10 border-b backdrop-blur lg:hidden" style="border-color: var(--border); background: color-mix(in srgb, var(--surface) 92%, transparent);">
+        <div class="flex items-center gap-3 px-4 py-3">
+          <button type="button" id="btn-menu" class="btn-icon flex-shrink-0" aria-label="Abrir menú">
+            <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 6h16M4 12h16M4 18h16"/>
+            </svg>
+          </button>
+          <div class="min-w-0 flex-1 text-center">
+            <span class="block truncate text-sm font-semibold">{{ agencia.nombre }}</span>
+            <span class="text-xs" style="color: var(--muted);">Panel</span>
+          </div>
+          <div class="w-10 flex-shrink-0" aria-hidden="true"></div>
+        </div>
+      </header>
+
+      <main class="flex-1">
+        <div class="page-container">
+          {% block content %}{% endblock %}
+        </div>
+      </main>
+    </div>
+  </div>
+  <script src="/static/js/dashboard-ui.js"></script>
+  <script src="/static/js/pwa.js"></script>
+</body>
+</html>

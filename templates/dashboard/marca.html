@@ -1,0 +1,216 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Marca y diseño — {{ agencia.nombre }}{% endblock %}
+{% block content %}
+<style>
+  #wa-preview { --preview-brand: {{ agencia.color_primario or '#3B82F6' }}; }
+</style>
+
+<div class="page-header">
+  <h1 class="page-title">Marca y diseño</h1>
+  <p class="page-subtitle">Identidad visual y comportamiento del bot en WhatsApp.</p>
+</div>
+
+<div class="grid gap-4 lg:grid-cols-2 lg:gap-5">
+  <form method="post" id="form-marca" class="ui-card js-save-form flex flex-col gap-5 p-5 sm:p-6" novalidate>
+    <div class="grid gap-4 sm:grid-cols-2">
+      <label class="block sm:col-span-2">
+        <span class="ui-label">Agencia</span>
+        <input id="nombre" name="nombre" required value="{{ agencia.nombre }}" class="ui-input">
+      </label>
+      <label class="block">
+        <span class="ui-label">Asesor virtual</span>
+        <input id="nombre_bot" name="nombre_bot" maxlength="80" value="{{ agencia.nombre_bot or '' }}"
+               placeholder="{{ nombre_bot_default }}" class="ui-input">
+      </label>
+      <label class="block">
+        <span class="ui-label">Modo WhatsApp</span>
+        <select name="modo_respuesta" class="ui-select">
+          {% for valor, etiqueta in modos_respuesta %}
+          <option value="{{ valor }}" {% if modo_respuesta_actual == valor %}selected{% endif %}>{{ etiqueta }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+
+    <div class="grid gap-4 sm:grid-cols-2">
+      <label class="block">
+        <span class="ui-label">Color primario</span>
+        <div class="flex items-center gap-2">
+          <input id="color_primario" name="color_primario" type="color"
+                 value="{{ agencia.color_primario or '#3B82F6' }}"
+                 class="h-9 w-12 cursor-pointer rounded-md p-0.5"
+                 style="border: 1px solid var(--border); background: var(--surface);">
+          <span id="color_hex" class="font-mono text-xs" style="color: var(--muted);">{{ agencia.color_primario or '#3B82F6' }}</span>
+        </div>
+      </label>
+      <label class="block">
+        <span class="ui-label">Logo</span>
+        <input id="archivo_logo" type="file" accept="image/*" class="hidden">
+        <button type="button" id="btn-subir-logo" class="btn-upload">
+          <svg class="h-4 w-4 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+          <span id="btn-subir-logo-texto">Subir logo</span>
+        </button>
+        <div id="logo-estado" class="upload-status hidden">
+          <span id="logo-spinner" class="form-spinner"></span>
+          <span id="logo-estado-texto">Subiendo logo...</span>
+        </div>
+      </label>
+    </div>
+
+    <div id="logo-thumb-wrap" class="{% if not agencia.logo_url %}hidden{% endif %} flex items-center gap-3 rounded-md px-3 py-2"
+         style="background: var(--surface); border: 1px solid var(--border);">
+      <img id="logo-thumb" src="{{ agencia.logo_url or '' }}" alt="Logo" class="h-10 w-10 rounded-md object-cover" style="border: 1px solid var(--border);">
+      <span class="text-xs" style="color: var(--muted);">Logo actual</span>
+    </div>
+
+    <button type="submit" id="btn-guardar" class="btn-primary mt-auto w-full py-3" data-saving-text="Guardando...">
+      Guardar cambios
+    </button>
+  </form>
+
+  <div class="flex flex-col gap-3 lg:sticky lg:top-4 lg:self-start">
+    <p class="ui-label" style="margin-bottom:0;">Vista previa · WhatsApp</p>
+    <div id="wa-preview" class="ui-card mx-auto w-full max-w-sm overflow-hidden p-0 shadow-2xl shadow-black/50">
+      <div class="flex items-center gap-3 px-4 py-3" style="background: #075E54;">
+        <div class="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-white/10">
+          <img id="wa-avatar-img" src="{{ agencia.logo_url or '' }}" alt=""
+               class="{% if not agencia.logo_url %}hidden{% endif %} h-full w-full object-cover">
+          <span id="wa-avatar-iniciales" class="{% if agencia.logo_url %}hidden{% endif %} text-xs font-bold text-white">{{ agencia.nombre[:2]|upper }}</span>
+        </div>
+        <div class="min-w-0 flex-1">
+          <p id="wa-contacto" class="truncate text-sm font-medium text-white">{{ agencia.nombre_bot or nombre_bot_default }}</p>
+          <p class="text-[11px] text-white/70">en línea</p>
+        </div>
+      </div>
+      <div class="min-h-[360px] px-3 py-4" style="background: #0b141a url('data:image/svg+xml,%3Csvg width=%2260%22 height=%2260%22 xmlns=%22http://www.w3.org/2000/svg%22%3E%3Cpath d=%22M30 0L60 30L30 60L0 30z%22 fill=%22%23111b21%22 fill-opacity=%220.4%22/%3E%3C/svg%3E');">
+        <div class="flex justify-start">
+          <div class="max-w-[88%] rounded-lg rounded-tl-none px-3 py-2 shadow-md" style="background: #1f2c34;">
+            <p id="preview-saludo" class="text-[13px] leading-relaxed text-[#e9edef]">{{ mensaje_bienvenida }}</p>
+          </div>
+        </div>
+      </div>
+      <div class="flex items-center gap-2 px-3 py-2" style="background: #1f2c34;">
+        <div class="flex-1 rounded-full px-4 py-2 text-xs text-white/30" style="background: #2a3942;">Mensaje</div>
+        <div class="flex h-9 w-9 items-center justify-center rounded-full" style="background: #00a884;">
+          <svg class="h-4 w-4 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  const AGENCIA_ID = {{ agencia.id }};
+  const DEFAULT_BOT = {{ nombre_bot_default|tojson }};
+  const DEFAULT_AGENCIA = {{ nombre_agencia_default|tojson }};
+  const LOGO_INICIAL = {{ (agencia.logo_url or '')|tojson }};
+
+  const nombreInput = document.getElementById('nombre');
+  const botInput = document.getElementById('nombre_bot');
+  const colorInput = document.getElementById('color_primario');
+  const colorHex = document.getElementById('color_hex');
+  const previewSaludo = document.getElementById('preview-saludo');
+  const waContacto = document.getElementById('wa-contacto');
+  const waAvatarImg = document.getElementById('wa-avatar-img');
+  const waIniciales = document.getElementById('wa-avatar-iniciales');
+  const archivoLogo = document.getElementById('archivo_logo');
+  const btnSubirLogo = document.getElementById('btn-subir-logo');
+  const btnSubirLogoTexto = document.getElementById('btn-subir-logo-texto');
+  const logoThumbWrap = document.getElementById('logo-thumb-wrap');
+  const logoThumb = document.getElementById('logo-thumb');
+  const logoEstado = document.getElementById('logo-estado');
+  const logoEstadoTexto = document.getElementById('logo-estado-texto');
+  let logoObjectUrl = null;
+  let logoGuardado = LOGO_INICIAL;
+
+  function inicialesDe(nombre) {
+    const t = (nombre || '').trim();
+    if (!t) return 'AG';
+    const partes = t.split(/\s+/).filter(Boolean);
+    if (partes.length >= 2) return (partes[0][0] + partes[1][0]).toUpperCase();
+    return t.slice(0, 2).toUpperCase();
+  }
+
+  function aplicarColor(hex) {
+    document.documentElement.style.setProperty('--brand', hex);
+    colorHex.textContent = hex;
+  }
+
+  function actualizarAvatar(src, iniciales) {
+    if (src) {
+      waAvatarImg.src = src;
+      waAvatarImg.classList.remove('hidden');
+      waIniciales.classList.add('hidden');
+      logoThumb.src = src;
+      logoThumbWrap.classList.remove('hidden');
+    } else {
+      waAvatarImg.classList.add('hidden');
+      waIniciales.classList.remove('hidden');
+      waIniciales.textContent = iniciales;
+      logoThumbWrap.classList.add('hidden');
+    }
+  }
+
+  function actualizarTextos() {
+    const agencia = (nombreInput.value || '').trim() || DEFAULT_AGENCIA;
+    const bot = (botInput.value || '').trim() || DEFAULT_BOT;
+    previewSaludo.textContent =
+      'Hola, soy ' + bot + ', tu asesor virtual de ' + agencia + '. ¿En qué puedo ayudarte hoy?';
+    waContacto.textContent = bot;
+    if (!logoGuardado) {
+      actualizarAvatar('', inicialesDe(nombreInput.value || agencia));
+    }
+  }
+
+  function setLogoCargando(activo, texto) {
+    logoEstado.classList.toggle('hidden', !activo);
+    btnSubirLogo.disabled = activo;
+    if (texto) logoEstadoTexto.textContent = texto;
+  }
+
+  async function subirLogo(file) {
+    if (!file) return;
+    setLogoCargando(true, 'Subiendo logo...');
+
+    if (logoObjectUrl) URL.revokeObjectURL(logoObjectUrl);
+    logoObjectUrl = URL.createObjectURL(file);
+    actualizarAvatar(logoObjectUrl, '');
+
+    const fd = new FormData();
+    fd.append('archivo_logo', file);
+    try {
+      const res = await fetch('/dashboard/' + AGENCIA_ID + '/marca/logo', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'error');
+      logoGuardado = data.logo_url;
+      actualizarAvatar(data.logo_url + '?t=' + Date.now(), '');
+      btnSubirLogoTexto.textContent = file.name;
+      setLogoCargando(true, 'Logo actualizado');
+      window.DashboardUI.showToast('Logo actualizado correctamente.');
+      setTimeout(function () { setLogoCargando(false); }, 800);
+    } catch (_) {
+      logoGuardado = '';
+      actualizarAvatar('', inicialesDe(nombreInput.value));
+      setLogoCargando(false);
+      window.DashboardUI.showToast('No se pudo subir el logo. Usá JPG, PNG o WebP.', 'error');
+    }
+  }
+
+  nombreInput.addEventListener('input', actualizarTextos);
+  botInput.addEventListener('input', actualizarTextos);
+  colorInput.addEventListener('input', function () { aplicarColor(colorInput.value); });
+
+  btnSubirLogo.addEventListener('click', function () { archivoLogo.click(); });
+  archivoLogo.addEventListener('change', function () {
+    const file = archivoLogo.files && archivoLogo.files[0];
+    if (file) subirLogo(file);
+    archivoLogo.value = '';
+  });
+
+  aplicarColor(colorInput.value);
+  actualizarTextos();
+  if (logoGuardado) actualizarAvatar(logoGuardado, '');
+})();
+</script>
+{% endblock %}

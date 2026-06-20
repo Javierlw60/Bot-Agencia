@@ -1,0 +1,26 @@
+{% extends "auth/base.html" %}
+{% block title %}Verificación WhatsApp{% endblock %}
+{% block content %}
+<div class="ui-card p-6">
+  <h1 class="text-lg font-semibold" style="color: var(--title);">Verificación en dos pasos</h1>
+  <p class="mt-1 text-sm leading-relaxed" style="color: var(--muted);">
+    Enviamos un código de 6 dígitos a tu WhatsApp. Ingresalo para acceder al panel.
+  </p>
+
+  {% if error %}
+  <div class="auth-alert auth-alert-error mt-4">{{ error }}</div>
+  {% endif %}
+
+  <form method="post" action="/auth/verificar-2fa" class="js-save-form mt-5 space-y-4" novalidate>
+    <label class="block">
+      <span class="ui-label">Código de acceso</span>
+      <input type="text" name="codigo" required maxlength="6" pattern="[0-9]{6}" inputmode="numeric"
+             autocomplete="one-time-code" class="ui-input text-center text-2xl font-bold tracking-[0.4em]"
+             placeholder="000000">
+    </label>
+    <button type="submit" class="btn-primary" data-saving-text="Verificando...">Ingresar al panel</button>
+  </form>
+
+  <p class="auth-link mt-5 text-center"><a href="/auth/login">Volver al inicio de sesión</a></p>
+</div>
+{% endblock %}

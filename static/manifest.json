@@ -1,0 +1,26 @@
+{
+  "name": "Bot Agencias — Panel",
+  "short_name": "Panel",
+  "description": "Panel de gestión para agencias automotrices",
+  "start_url": "/auth/login",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0f172a",
+  "theme_color": "#3B82F6",
+  "lang": "es-AR",
+  "icons": [
+    {
+      "src": "/static/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/static/icons/maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

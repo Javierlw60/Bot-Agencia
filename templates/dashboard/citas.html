@@ -1,0 +1,340 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Citas — {{ agencia.nombre }}{% endblock %}
+{% block content %}
+<div class="page-header flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+  <div>
+    <h1 class="page-title">Citas</h1>
+    <p class="page-subtitle">Visitas agendadas en tiempo real. Hacé clic en una cita para ver la conversación.</p>
+  </div>
+  <div class="flex flex-wrap items-center gap-2">
+    <span id="indicador-vivo" class="ui-card inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium" style="color: #6ee7b7;">
+      <span class="relative flex h-2 w-2">
+        <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
+        <span class="relative inline-flex h-2 w-2 rounded-full bg-emerald-500"></span>
+      </span>
+      En vivo
+    </span>
+    <button type="button" id="btn-notificaciones-os"
+            class="ui-card px-3 py-1.5 text-xs transition hover:opacity-90" style="color: var(--muted);">
+      Activar alertas del sistema
+    </button>
+    <button type="button" id="btn-silenciar"
+            class="ui-card px-3 py-1.5 text-xs transition hover:opacity-90" style="color: var(--muted);"
+            title="Silenciar sonido y notificaciones">
+      🔊 Alertas activas
+    </button>
+  </div>
+</div>
+
+<div class="grid gap-4 lg:grid-cols-2 lg:gap-5">
+  <section class="ui-card p-5 sm:p-6">
+    <h2 class="text-base font-semibold" id="titulo-hoy" style="color: var(--title);">Hoy</h2>
+    <div id="lista-hoy" class="mt-4"></div>
+  </section>
+  <section class="ui-card p-5 sm:p-6">
+    <h2 class="text-base font-semibold" id="titulo-manana" style="color: var(--title);">Mañana</h2>
+    <div id="lista-manana" class="mt-4"></div>
+  </section>
+</div>
+
+<div id="modal-historial" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+  <div class="ui-card flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden shadow-2xl">
+    <div class="flex items-start justify-between border-b px-5 py-4" style="border-color: var(--border);">
+      <div>
+        <h3 id="modal-titulo" class="text-lg font-semibold" style="color: var(--title);">Conversación</h3>
+        <p id="modal-subtitulo" class="mt-1 text-sm" style="color: var(--muted);"></p>
+        <ul id="modal-resumen" class="mt-2 flex flex-wrap gap-2 text-xs"></ul>
+      </div>
+      <button type="button" id="modal-cerrar"
+              class="rounded-lg p-2 transition hover:opacity-80" style="color: var(--muted);">&times;</button>
+    </div>
+    <div id="modal-cargando" class="hidden px-5 py-8 text-center text-sm" style="color: var(--muted);">Cargando historial...</div>
+    <div id="modal-chat" class="flex-1 space-y-3 overflow-y-auto px-5 py-4"></div>
+    <div class="border-t px-5 py-3 text-xs" style="border-color: var(--border); color: var(--muted);">
+      Historial de WhatsApp vinculado al teléfono del cliente
+    </div>
+  </div>
+</div>
+
+<script>
+  (function () {
+    const agenciaId = {{ agencia.id }};
+    const feedInicial = {{ feed_inicial | tojson }};
+    const POLL_MS = 8000;
+    const STORAGE_SILENCIO = 'citas_alertas_silenciadas';
+
+    const listaHoy = document.getElementById('lista-hoy');
+    const listaManana = document.getElementById('lista-manana');
+    const tituloHoy = document.getElementById('titulo-hoy');
+    const tituloManana = document.getElementById('titulo-manana');
+    const btnSilenciar = document.getElementById('btn-silenciar');
+    const btnNotifOs = document.getElementById('btn-notificaciones-os');
+    const modal = document.getElementById('modal-historial');
+    const titulo = document.getElementById('modal-titulo');
+    const subtitulo = document.getElementById('modal-subtitulo');
+    const resumen = document.getElementById('modal-resumen');
+    const chat = document.getElementById('modal-chat');
+    const cargando = document.getElementById('modal-cargando');
+    const btnCerrar = document.getElementById('modal-cerrar');
+
+    let citasConocidas = new Set();
+    let feedInicializado = false;
+    let audioCtx = null;
+
+    function estaSilenciado() {
+      return localStorage.getItem(STORAGE_SILENCIO) === '1';
+    }
+
+    function actualizarBotonSilencio() {
+      if (estaSilenciado()) {
+        btnSilenciar.textContent = '🔇 Alertas silenciadas';
+        btnSilenciar.classList.add('border-amber-500/40', 'text-amber-400');
+      } else {
+        btnSilenciar.textContent = '🔊 Alertas activas';
+        btnSilenciar.classList.remove('border-amber-500/40', 'text-amber-400');
+      }
+    }
+
+    function reproducirSonido() {
+      if (estaSilenciado()) return;
+      try {
+        if (!audioCtx) {
+          audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        if (audioCtx.state === 'suspended') {
+          audioCtx.resume();
+        }
+        const t = audioCtx.currentTime;
+        [0, 0.18].forEach(function (offset) {
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+          osc.type = 'sine';
+          osc.frequency.value = offset === 0 ? 880 : 1175;
+          gain.gain.setValueAtTime(0.0001, t + offset);
+          gain.gain.exponentialRampToValueAtTime(0.12, t + offset + 0.02);
+          gain.gain.exponentialRampToValueAtTime(0.0001, t + offset + 0.15);
+          osc.connect(gain);
+          gain.connect(audioCtx.destination);
+          osc.start(t + offset);
+          osc.stop(t + offset + 0.16);
+        });
+      } catch (_) {}
+    }
+
+    function notificarSistema(cita) {
+      if (estaSilenciado()) return;
+      if (!('Notification' in window) || Notification.permission !== 'granted') return;
+      try {
+        const n = new Notification('¡Nueva cita agendada!', {
+          body: cita.cliente + ' - ' + cita.hora,
+          tag: 'cita-' + cita.id,
+          requireInteraction: false,
+        });
+        n.onclick = function () {
+          window.focus();
+          n.close();
+        };
+      } catch (_) {}
+    }
+
+    function escHtml(texto) {
+      const d = document.createElement('div');
+      d.textContent = texto;
+      return d.innerHTML;
+    }
+
+    const EMPTY_STATE_HTML = (
+      '<div class="empty-state">' +
+      '<div class="empty-state-icon" aria-hidden="true">' +
+      '<svg class="h-7 w-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+      '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>' +
+      '</svg></div>' +
+      '<p class="empty-state-title">No hay registros para este día</p>' +
+      '<p class="empty-state-text">Las citas agendadas por el bot aparecerán acá automáticamente.</p>' +
+      '</div>'
+    );
+
+    function renderCitaItem(cita, esHoy) {
+      const horaClass = esHoy
+        ? 'rounded-lg px-2.5 py-1 text-sm font-semibold text-brand'
+        : 'rounded-lg px-2.5 py-1 text-sm font-semibold';
+      const horaStyle = esHoy
+        ? 'background: color-mix(in srgb, var(--brand) 18%, transparent);'
+        : 'background: color-mix(in srgb, var(--card) 80%, var(--surface)); color: var(--title);';
+      const recordatorio = cita.recordatorio_enviado
+        ? '<p class="mt-1 text-xs" style="color:#6ee7b7;">Recordatorio enviado</p>' : '';
+
+      return (
+        '<li><button type="button" class="cita-item group w-full rounded-lg px-2 py-4 text-left transition hover:opacity-90" data-cita-id="' + cita.id + '" style="border-bottom:1px solid var(--border);">' +
+        '<div class="flex items-start justify-between gap-3">' +
+        '<div><p class="font-medium group-hover:text-brand transition" style="color:var(--title);">' + escHtml(cita.cliente) + '</p>' +
+        '<p class="mt-1 text-sm" style="color:var(--muted);">' + escHtml(cita.auto) + '</p>' +
+        '<p class="mt-1 text-xs" style="color:var(--muted);">Tel: ' + escHtml(cita.telefono) + '</p>' +
+        '<p class="mt-2 text-xs text-brand opacity-0 group-hover:opacity-100 transition">Ver conversación →</p></div>' +
+        '<div class="text-right"><span class="' + horaClass + '" style="' + horaStyle + '">' + escHtml(cita.hora) + '</span>' +
+        '<p class="mt-1 text-xs capitalize" style="color:var(--muted);">' + escHtml(cita.estado) + '</p>' + recordatorio + '</div></div></button></li>'
+      );
+    }
+
+    function renderLista(contenedor, citas, esHoy) {
+      if (!citas.length) {
+        contenedor.innerHTML = EMPTY_STATE_HTML;
+        return;
+      }
+      contenedor.innerHTML = '<ul>' +
+        citas.map(function (c) { return renderCitaItem(c, esHoy); }).join('') + '</ul>';
+    }
+
+    function aplicarFeed(feed, notificarNuevas) {
+      tituloHoy.textContent = 'Hoy — ' + feed.fecha_hoy;
+      tituloManana.textContent = 'Mañana — ' + feed.fecha_manana;
+      renderLista(listaHoy, feed.citas_hoy, true);
+      renderLista(listaManana, feed.citas_manana, false);
+
+      const todas = feed.citas_hoy.concat(feed.citas_manana);
+      const mapa = {};
+      todas.forEach(function (c) { mapa[c.id] = c; });
+
+      if (!feedInicializado) {
+        todas.forEach(function (c) { citasConocidas.add(c.id); });
+        feedInicializado = true;
+        return;
+      }
+
+      if (notificarNuevas) {
+        todas.forEach(function (c) {
+          if (!citasConocidas.has(c.id)) {
+            citasConocidas.add(c.id);
+            reproducirSonido();
+            notificarSistema(c);
+            const card = document.querySelector('[data-cita-id="' + c.id + '"]');
+            if (card) {
+              card.classList.add('ring-2', 'ring-brand', 'animate-pulse');
+              setTimeout(function () {
+                card.classList.remove('animate-pulse');
+              }, 3000);
+            }
+          }
+        });
+      }
+
+      citasConocidas = new Set(todas.map(function (c) { return c.id; }));
+    }
+
+    async function pollFeed() {
+      try {
+        const res = await fetch('/dashboard/' + agenciaId + '/citas/feed');
+        if (!res.ok) return;
+        const feed = await res.json();
+        aplicarFeed(feed, true);
+      } catch (_) {}
+    }
+
+    function cerrarModal() {
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+      chat.innerHTML = '';
+      resumen.innerHTML = '';
+    }
+
+    function renderMensaje(msg) {
+      const esCliente = msg.rol === 'cliente';
+      const wrap = document.createElement('div');
+      wrap.className = 'flex ' + (esCliente ? 'justify-start' : 'justify-end');
+      const burbuja = document.createElement('div');
+      burbuja.className = 'max-w-[85%] rounded-2xl px-4 py-2.5 text-sm ' + (
+        esCliente ? 'rounded-bl-md bg-slate-800 text-slate-100' : 'rounded-br-md bg-brand/25 text-white ring-1 ring-brand/30'
+      );
+      const texto = document.createElement('p');
+      texto.className = 'whitespace-pre-wrap break-words';
+      texto.textContent = msg.texto;
+      burbuja.appendChild(texto);
+      if (msg.fecha) {
+        const fecha = document.createElement('p');
+        fecha.className = 'mt-1 text-right text-[10px] opacity-60';
+        fecha.textContent = msg.fecha;
+        burbuja.appendChild(fecha);
+      }
+      wrap.appendChild(burbuja);
+      return wrap;
+    }
+
+    async function abrirHistorial(citaId) {
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+      cargando.classList.remove('hidden');
+      chat.innerHTML = '';
+      resumen.innerHTML = '';
+      try {
+        const res = await fetch('/dashboard/' + agenciaId + '/citas/' + citaId + '/historial');
+        if (!res.ok) throw new Error();
+        const data = await res.json();
+        titulo.textContent = data.cliente;
+        subtitulo.textContent = data.fecha_cita + ' ' + data.hora_cita + ' hs · ' + (data.auto_interes || 'Sin auto') + ' · ' + data.telefono;
+        if (data.resumen && data.resumen.items) {
+          data.resumen.items.forEach(function (item) {
+            const li = document.createElement('li');
+            li.className = 'rounded-full bg-slate-800 px-2.5 py-1 text-slate-300';
+            li.textContent = item;
+            resumen.appendChild(li);
+          });
+        }
+        if (!data.mensajes || !data.mensajes.length) {
+          chat.innerHTML = '<p class="py-8 text-center text-sm text-slate-500">Todavía no hay mensajes guardados para este cliente.</p>';
+        } else {
+          data.mensajes.forEach(function (msg) { chat.appendChild(renderMensaje(msg)); });
+        }
+      } catch (_) {
+        chat.innerHTML = '<p class="py-8 text-center text-sm text-red-400">Error al cargar el historial.</p>';
+      } finally {
+        cargando.classList.add('hidden');
+      }
+    }
+
+    document.addEventListener('click', function (e) {
+      const btn = e.target.closest('.cita-item');
+      if (btn && btn.dataset.citaId) {
+        abrirHistorial(btn.dataset.citaId);
+      }
+    });
+
+    btnSilenciar.addEventListener('click', function () {
+      localStorage.setItem(STORAGE_SILENCIO, estaSilenciado() ? '0' : '1');
+      actualizarBotonSilencio();
+      if (!estaSilenciado() && audioCtx && audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+    });
+
+    btnNotifOs.addEventListener('click', async function () {
+      if (!('Notification' in window)) {
+        alert('Tu navegador no soporta notificaciones de escritorio.');
+        return;
+      }
+      const perm = await Notification.requestPermission();
+      if (perm === 'granted') {
+        btnNotifOs.textContent = 'Alertas del sistema activas';
+        btnNotifOs.disabled = true;
+        btnNotifOs.classList.add('opacity-60');
+      }
+    });
+
+    if ('Notification' in window && Notification.permission === 'granted') {
+      btnNotifOs.textContent = 'Alertas del sistema activas';
+      btnNotifOs.disabled = true;
+      btnNotifOs.classList.add('opacity-60');
+    }
+
+    btnCerrar.addEventListener('click', cerrarModal);
+    modal.addEventListener('click', function (e) { if (e.target === modal) cerrarModal(); });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') cerrarModal(); });
+
+    actualizarBotonSilencio();
+    aplicarFeed(feedInicial, false);
+    setInterval(pollFeed, POLL_MS);
+    document.addEventListener('visibilitychange', function () {
+      if (!document.hidden) pollFeed();
+    });
+  })();
+</script>
+{% endblock %}

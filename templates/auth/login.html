@@ -1,0 +1,28 @@
+{% extends "auth/base.html" %}
+{% block title %}Iniciar sesión{% endblock %}
+{% block content %}
+<div class="ui-card p-6">
+  <h1 class="text-lg font-semibold" style="color: var(--title);">Iniciar sesión</h1>
+  <p class="mt-1 text-sm" style="color: var(--muted);">Ingresá con tu correo. Te enviaremos un código por WhatsApp.</p>
+
+  {% if error %}
+  <div class="auth-alert auth-alert-error mt-4">{{ error }}</div>
+  {% elif ok == 'email' %}
+  <div class="auth-alert auth-alert-ok mt-4">Correo verificado. Ya podés iniciar sesión.</div>
+  {% endif %}
+
+  <form method="post" action="/auth/login" class="js-save-form mt-5 space-y-4" novalidate>
+    <label class="block">
+      <span class="ui-label">Correo electrónico</span>
+      <input type="email" name="email" required autocomplete="email" class="ui-input" placeholder="tu@agencia.com">
+    </label>
+    <label class="block">
+      <span class="ui-label">Contraseña</span>
+      <input type="password" name="password" required autocomplete="current-password" minlength="8" class="ui-input" placeholder="••••••••">
+    </label>
+    <button type="submit" class="btn-primary" data-saving-text="Verificando...">Continuar</button>
+  </form>
+
+  <p class="auth-link mt-5 text-center">¿No tenés cuenta? <a href="/auth/registro">Registrate</a></p>
+</div>
+{% endblock %}

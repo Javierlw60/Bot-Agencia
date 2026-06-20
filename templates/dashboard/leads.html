@@ -1,0 +1,51 @@
+{% extends "dashboard/base.html" %}
+{% from "dashboard/macros.html" import empty_state %}
+{% block title %}Leads — {{ agencia.nombre }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <a href="/dashboard/{{ agencia.id }}" class="text-sm hover:opacity-90" style="color: var(--muted);">← Volver al inicio</a>
+  <h1 class="page-title mt-2">Leads</h1>
+  <p class="page-subtitle">{{ total_leads }} prospectos registrados</p>
+</div>
+
+{% if leads %}
+<div class="ui-card overflow-hidden p-1 sm:p-2">
+  <div class="overflow-x-auto">
+    <table class="w-full border-separate text-sm" style="border-spacing: 0 0.5rem;">
+      <thead>
+        <tr>
+          <th class="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider" style="color: var(--muted);">Cliente</th>
+          <th class="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider" style="color: var(--muted);">Teléfono</th>
+          <th class="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider" style="color: var(--muted);">Estado</th>
+          <th class="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wider" style="color: var(--muted);">Fecha</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for lead in leads %}
+        <tr>
+          <td colspan="4" class="p-0">
+            <div class="ui-card grid grid-cols-1 gap-2 px-5 py-4 sm:grid-cols-4 sm:items-center sm:gap-4" style="background: color-mix(in srgb, var(--card) 96%, var(--surface));">
+              <p class="text-[15px] font-semibold" style="color: var(--title);">
+                {% if lead.nombre_cliente or lead.apellido_cliente %}
+                {{ lead.nombre_cliente or '' }} {{ lead.apellido_cliente or '' }}
+                {% else %}—{% endif %}
+              </p>
+              <p class="text-sm" style="color: var(--muted);">{{ lead.telefono_cliente or '—' }}</p>
+              <p class="text-sm" style="color: var(--muted);">{{ lead.estado_comercial or '—' }}</p>
+              <p class="text-right text-sm tabular-nums" style="color: var(--muted);">
+                {% if lead.fecha_creacion %}{{ lead.fecha_creacion.strftime('%d/%m/%Y') }}{% else %}—{% endif %}
+              </p>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="ui-card">
+  {{ empty_state('No hay leads registrados', 'Cuando un cliente contacte al bot por WhatsApp, sus datos aparecerán acá.', 'users') }}
+</div>
+{% endif %}
+{% endblock %}

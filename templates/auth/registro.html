@@ -1,0 +1,43 @@
+{% extends "auth/base.html" %}
+{% block title %}Registro{% endblock %}
+{% block content %}
+<div class="ui-card p-6">
+  <h1 class="text-lg font-semibold" style="color: var(--title);">Crear cuenta</h1>
+  <p class="mt-1 text-sm" style="color: var(--muted);">Registrá tu agencia. Verificaremos tu correo y WhatsApp al iniciar sesión.</p>
+
+  {% if error %}
+  <div class="auth-alert auth-alert-error mt-4">{{ error }}</div>
+  {% endif %}
+
+  <form method="post" action="/auth/registro" class="js-save-form mt-5 space-y-4" novalidate>
+    <label class="block">
+      <span class="ui-label">Tu nombre</span>
+      <input type="text" name="nombre" required class="ui-input" placeholder="Juan Pérez">
+    </label>
+    <label class="block">
+      <span class="ui-label">Nombre de la agencia</span>
+      <input type="text" name="nombre_agencia" required class="ui-input" placeholder="Mi Agencia Autos">
+    </label>
+    <label class="block">
+      <span class="ui-label">Correo electrónico</span>
+      <input type="email" name="email" required autocomplete="email" class="ui-input" placeholder="tu@agencia.com">
+    </label>
+    <label class="block">
+      <span class="ui-label">WhatsApp (2FA)</span>
+      <input type="tel" name="telefono" required class="ui-input" placeholder="54911XXXXXXXX" inputmode="numeric">
+      <span class="mt-1 block text-xs" style="color: var(--muted);">Con código de país, sin espacios. Ahí enviaremos el código de acceso.</span>
+    </label>
+    <label class="block">
+      <span class="ui-label">Contraseña</span>
+      <input type="password" name="password" required minlength="8" autocomplete="new-password" class="ui-input" placeholder="Mínimo 8 caracteres">
+    </label>
+    <label class="block">
+      <span class="ui-label">Confirmar contraseña</span>
+      <input type="password" name="password_confirm" required minlength="8" autocomplete="new-password" class="ui-input">
+    </label>
+    <button type="submit" class="btn-primary" data-saving-text="Creando cuenta...">Crear cuenta</button>
+  </form>
+
+  <p class="auth-link mt-5 text-center">¿Ya tenés cuenta? <a href="/auth/login">Iniciar sesión</a></p>
+</div>
+{% endblock %}
