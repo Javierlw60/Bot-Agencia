@@ -6,19 +6,43 @@
   <div>
     <h1 class="page-title">Inventario</h1>
     {% if request.query_params.get('estado') == 'disponible' %}
-    <p class="page-subtitle">{{ disponibles }} vehículos disponibles · {{ total_stock }} en stock</p>
+    <p class="page-subtitle">{{ sucursal_activa.nombre }} · {{ disponibles }} disponibles · {{ total_stock }} en stock</p>
     {% else %}
-    <p class="page-subtitle">{{ total_stock }} vehículos en stock</p>
+    <p class="page-subtitle">{{ sucursal_activa.nombre }} · {{ total_stock }} vehículos en stock</p>
     {% endif %}
   </div>
-  <a href="/dashboard/{{ agencia.id }}/inventario/nuevo" class="btn-primary shrink-0">
-    + Agregar vehículo
-  </a>
+  <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
+    <label class="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">
+      <span class="text-xs font-medium uppercase tracking-wide" style="color: var(--muted);">Sucursal</span>
+      <select id="selector-sucursal-inventario" class="ui-select min-w-[11rem]">
+        {% for suc in sucursales %}
+        <option value="{{ suc.id }}" {% if suc.id == sucursal_activa.id %}selected{% endif %}>{{ suc.nombre }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <a href="/dashboard/{{ agencia.id }}/inventario/nuevo?sucursal={{ sucursal_activa.id }}" class="btn-primary shrink-0">
+      + Agregar vehículo
+    </a>
+  </div>
 </div>
 
+{% if request.query_params.get('ok') == 'import' %}
+<div class="ui-card mb-4 px-4 py-3 text-sm" style="color: #6ee7b7;">
+  Importación exitosa: {{ request.query_params.get('total', '0') }} vehículo(s) procesados.
+</div>
+{% elif request.query_params.get('ok') == 'eliminado' %}
+<div class="ui-card mb-4 px-4 py-3 text-sm" style="color: #6ee7b7;">
+  Vehículo eliminado correctamente.
+</div>
 {% elif request.query_params.get('error') %}
 <div class="ui-card mb-4 px-4 py-3 text-sm" style="color: #fca5a5;">
-  {% if request.query_params.get('error') == 'formato' %}Solo se admite CSV.{% else %}No se pudo importar el archivo.{% endif %}
+  {% if request.query_params.get('error') == 'formato' %}
+  Solo se admite CSV.
+  {% elif request.query_params.get('error') == 'codificacion' %}
+  No se pudo leer la codificación del archivo.
+  {% else %}
+  No se pudo importar el archivo{% if request.query_params.get('msg') %}: {{ request.query_params.get('msg') }}{% endif %}.
+  {% endif %}
 </div>
 {% endif %}
 
@@ -46,12 +70,12 @@
 <div class="ui-card w-full overflow-hidden p-1 sm:p-2">
 <div class="overflow-x-auto">
   <table class="inv-table w-full border-separate" style="border-spacing: 0 0.625rem;">
-    <thead>
+    <thead class="table-head-brand">
       <tr>
-        <th class="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider" style="color: var(--muted);">Vehículo</th>
-        <th class="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wider" style="color: var(--muted);">Año</th>
-        <th class="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wider" style="color: var(--muted);">Precio</th>
-        <th class="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider" style="color: var(--muted);">Estado</th>
+        <th class="px-5 py-2.5 text-left">Vehículo</th>
+        <th class="px-5 py-2.5 text-right">Año</th>
+        <th class="px-5 py-2.5 text-right">Precio</th>
+        <th class="px-5 py-2.5 text-left">Estado</th>
       </tr>
     </thead>
     <tbody id="tabla-inventario">
@@ -101,7 +125,10 @@
     border-bottom: 1px solid var(--border);
     transition: background-color 0.15s ease;
   }
-  .inv-row .inv-cell-l { border-left: 1px solid var(--border); border-radius: 0.5rem 0 0 0.5rem; }
+  .inv-row .inv-cell-l {
+    border-left: 4px solid var(--brand);
+    border-radius: 0.5rem 0 0 0.5rem;
+  }
   .inv-row .inv-cell-r { border-right: 1px solid var(--border); border-radius: 0 0.5rem 0.5rem 0; }
   .inv-row:hover .inv-cell { background: color-mix(in srgb, var(--card) 80%, var(--title)); }
 </style>
@@ -131,6 +158,15 @@
       zona.addEventListener('drop', function (e) {
         e.preventDefault();
         enviarArchivo(e.dataTransfer.files[0]);
+      });
+    }
+
+    const selectorSucursal = document.getElementById('selector-sucursal-inventario');
+    if (selectorSucursal) {
+      selectorSucursal.addEventListener('change', function () {
+        const params = new URLSearchParams(window.location.search);
+        params.set('sucursal', this.value);
+        window.location.href = '/dashboard/{{ agencia.id }}/inventario?' + params.toString();
       });
     }
 

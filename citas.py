@@ -2,7 +2,7 @@ import datetime
 import re
 import unicodedata
 
-from models.database import Auto, Cita, SessionLocal
+from models.database import Auto, Cita, ProspectoLead, SessionLocal
 
 # Argentina no usa horario de verano desde 2009 (UTC-3 permanente).
 ZONA_ARGENTINA = datetime.timezone(datetime.timedelta(hours=-3))
@@ -257,6 +257,8 @@ def asegurar_lead_id(
     usado_vtv_vigente: str | None = None,
     usado_es_titular: str | None = None,
     lead_id_existente: int | None = None,
+    sucursal_id: int | None = None,
+    vendedor_id: int | None = None,
 ) -> int:
     from inventory import guardar_lead_comercial
 
@@ -275,6 +277,8 @@ def asegurar_lead_id(
         usado_vtv_vigente=usado_vtv_vigente,
         usado_es_titular=usado_es_titular,
         lead_id=lead_id_existente,
+        sucursal_id=sucursal_id,
+        vendedor_id=vendedor_id,
     )
 
 
@@ -283,15 +287,24 @@ def guardar_cita(
     fecha_cita: datetime.date,
     hora_cita: datetime.time,
     auto_interes: str | None = None,
+    sucursal_id: int | None = None,
+    vendedor_id: int | None = None,
 ) -> int:
     db = SessionLocal()
     try:
+        lead = db.query(ProspectoLead).filter(ProspectoLead.id == cliente_id).first()
+        if sucursal_id is None and lead:
+            sucursal_id = lead.sucursal_id
+        if vendedor_id is None and lead:
+            vendedor_id = getattr(lead, "vendedor_id", None)
         cita = Cita(
             cliente_id=cliente_id,
+            sucursal_id=sucursal_id,
+            vendedor_id=vendedor_id,
             fecha_cita=fecha_cita,
             hora_cita=hora_cita.strftime("%H:%M"),
             auto_interes=auto_interes,
-            estado="confirmada",
+            estado="pendiente",
             recordatorio_enviado=False,
         )
         db.add(cita)
@@ -320,6 +333,14 @@ def procesar_cita_si_corresponde(sesion) -> int | None:
         return None
 
     fecha_cita, hora_cita = fecha_hora
+    from inventory import resolver_sucursal_id_cita
+
+    vendedor_id = getattr(sesion, "vendedor_origen_id", None)
+    sucursal_cita_id = resolver_sucursal_id_cita(
+        sesion.agencia_id,
+        getattr(sesion, "sucursal_origen_id", None),
+        sesion.auto_interes_id,
+    )
     sesion.lead_id = asegurar_lead_id(
         agencia_id=sesion.agencia_id,
         telefono=sesion.telefono,
@@ -335,6 +356,8 @@ def procesar_cita_si_corresponde(sesion) -> int | None:
         usado_vtv_vigente=sesion.usado_vtv_vigente,
         usado_es_titular=sesion.usado_es_titular,
         lead_id_existente=sesion.lead_id,
+        sucursal_id=getattr(sesion, "sucursal_origen_id", None),
+        vendedor_id=vendedor_id,
     )
     from conversaciones import vincular_mensajes_a_lead
 
@@ -346,6 +369,8 @@ def procesar_cita_si_corresponde(sesion) -> int | None:
         fecha_cita=fecha_cita,
         hora_cita=hora_cita,
         auto_interes=auto_interes,
+        sucursal_id=sucursal_cita_id,
+        vendedor_id=vendedor_id,
     )
     sesion.cita_registrada_id = cita_id
     return cita_id

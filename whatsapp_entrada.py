@@ -8,17 +8,47 @@ from auditoria_audio import (
     eliminar_archivo_temporal,
     registrar_interaccion_audio,
 )
-from bot import _enviar_bienvenida_inicial, _finalizar_y_guardar_lead, _procesar_mensaje
-from models.database import Agencia
+from bot import SesionCliente, _enviar_bienvenida_inicial, _finalizar_y_guardar_lead, _procesar_mensaje
+from models.database import Agencia, Sucursal, Vendedor
 from sesiones_bot import obtener_o_crear_sesion
 from whatsapp import descargar_media_whatsapp, enviar_respuesta_bot
 
 DIR_TEMP_AUDIO = Path(__file__).resolve().parent / "static" / "temp" / "whatsapp"
 
 
-def procesar_texto_whatsapp(agencia: Agencia, telefono: str, texto: str) -> str:
+def _aplicar_sucursal_sesion(
+    sesion: SesionCliente,
+    sucursal: Sucursal | None,
+    vendedor: Vendedor | None = None,
+) -> None:
+    if sucursal:
+        sesion.sucursal_origen_id = sucursal.id
+    if vendedor:
+        sesion.vendedor_origen_id = vendedor.id
+        if vendedor.sucursal_id:
+            sesion.sucursal_origen_id = vendedor.sucursal_id
+        if vendedor.telefono_whatsapp:
+            sesion.line_whatsapp_id = vendedor.telefono_whatsapp
+    elif sucursal and sucursal.telefono_whatsapp:
+        sesion.line_whatsapp_id = sucursal.telefono_whatsapp
+
+
+def _linea_whatsapp_respuesta(agencia: Agencia, sesion: SesionCliente) -> str:
+    if sesion.line_whatsapp_id:
+        return sesion.line_whatsapp_id
+    return agencia.whatsapp_phone_number_id
+
+
+def procesar_texto_whatsapp(
+    agencia: Agencia,
+    telefono: str,
+    texto: str,
+    sucursal: Sucursal | None = None,
+    vendedor: Vendedor | None = None,
+) -> str:
     """Pasa un mensaje escrito a la lógica principal del bot."""
     sesion = obtener_o_crear_sesion(agencia.id, telefono)
+    _aplicar_sucursal_sesion(sesion, sucursal, vendedor)
     _enviar_bienvenida_inicial(sesion, agencia, via_whatsapp=True)
     respuesta = _procesar_mensaje(sesion, agencia, texto, via_whatsapp=True)
     _finalizar_y_guardar_lead(sesion)
@@ -30,6 +60,8 @@ def procesar_audio_whatsapp(
     telefono: str,
     media_id: str,
     whatsapp_message_id: str | None = None,
+    sucursal: Sucursal | None = None,
+    vendedor: Vendedor | None = None,
 ) -> dict:
     """
     Flujo completo de audio entrante:
@@ -56,6 +88,7 @@ def procesar_audio_whatsapp(
             mp_media_id=media_id,
         )
         sesion = obtener_o_crear_sesion(agencia.id, telefono)
+        _aplicar_sucursal_sesion(sesion, sucursal, vendedor)
         auditoria_id = registrar_interaccion_audio(
             agencia_id=agencia.id,
             telefono=telefono,
@@ -80,13 +113,15 @@ def procesar_audio_whatsapp(
         resultado["ok"] = True
         return resultado
     except SpeechToTextError as exc:
+        sesion = obtener_o_crear_sesion(agencia.id, telefono)
+        _aplicar_sucursal_sesion(sesion, sucursal, vendedor)
         mensaje_error = (
             "No pude entender el audio. ¿Podés escribirme tu consulta por texto?"
         )
         enviar_respuesta_bot(
             telefono_destino=telefono,
             mensaje=mensaje_error,
-            whatsapp_phone_number_id=agencia.whatsapp_phone_number_id,
+            whatsapp_phone_number_id=_linea_whatsapp_respuesta(agencia, sesion),
             modo_respuesta=agencia.modo_respuesta,
             imprimir_texto_en_consola=False,
         )

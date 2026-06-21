@@ -22,9 +22,11 @@ from inventory import (
     buscar_autos_por_texto,
     cliente_pide_fotos,
     formatear_fotos_para_whatsapp,
+    formatear_opciones_stock_cruzado,
     guardar_lead_comercial,
     obtener_auto_por_id,
     obtener_inventario_agencia,
+    obtener_nombre_sucursal,
 )
 from models.database import Agencia, SessionLocal, inicializar_base_de_datos
 from whatsapp import enviar_respuesta_bot
@@ -33,7 +35,12 @@ from permuta import (
     extraer_datos_usado_en_segundo_plano,
     resumen_usado_sesion,
 )
-from personalizacion_bot import mensaje_bienvenida_agencia, obtener_nombre_agencia_bot
+from personalizacion_bot import (
+    mensaje_bienvenida_agencia,
+    obtener_nombre_agencia_bot,
+    obtener_sucursal,
+    obtener_vendedor,
+)
 from prompts import generar_prompt_maestro
 
 load_dotenv()
@@ -156,6 +163,9 @@ class SesionCliente:
     quiere_permuta: bool = False
     lead_id: int | None = None
     cita_registrada_id: int | None = None
+    sucursal_origen_id: int | None = None
+    vendedor_origen_id: int | None = None
+    line_whatsapp_id: str | None = None
     cuota_diaria_agotada: bool = False
     historial: list[str] = field(default_factory=list)
 
@@ -175,14 +185,18 @@ def _entregar_respuesta_whatsapp(
     telefono: str,
     texto: str,
     via_whatsapp: bool = False,
+    sesion: SesionCliente | None = None,
 ) -> None:
     """Muestra la respuesta en consola y/o la envía por WhatsApp (texto/voz/ambas)."""
     if not via_whatsapp:
         print("\nBot:", texto)
+    line_id = agencia.whatsapp_phone_number_id
+    if sesion and sesion.line_whatsapp_id:
+        line_id = sesion.line_whatsapp_id
     enviar_respuesta_bot(
         telefono_destino=telefono,
         mensaje=texto,
-        whatsapp_phone_number_id=agencia.whatsapp_phone_number_id,
+        whatsapp_phone_number_id=line_id,
         modo_respuesta=agencia.modo_respuesta,
         imprimir_texto_en_consola=not via_whatsapp,
     )
@@ -279,14 +293,20 @@ def _normalizar_texto(texto: str) -> str:
 
 def _extraer_presupuesto(texto: str) -> float | None:
     texto_norm = _normalizar_texto(texto).replace(",", ".")
+    min_valido = 500_000
+
+    def _aceptar(valor: float | None) -> float | None:
+        if valor is None or valor < min_valido:
+            return None
+        return valor
 
     if "millon" in texto_norm:
         numeros = re.findall(r"\d+", texto_norm)
         if numeros:
-            return float(numeros[0]) * 1_000_000
+            return _aceptar(float(numeros[0]) * 1_000_000)
 
     if re.fullmatch(r"\d{1,2}\.\d{3}\.\d{2}", texto_norm):
-        return float(texto_norm.split(".")[0]) * 1_000_000
+        return _aceptar(float(texto_norm.split(".")[0]) * 1_000_000)
 
     match = re.search(r"\d{1,3}(?:\.\d{3})+|\d+(?:\.\d+)?", texto_norm)
     if match:
@@ -299,7 +319,7 @@ def _extraer_presupuesto(texto: str) -> float | None:
                 raw = raw.replace(".", "")
         elif raw.count(".") == 1 and len(raw.split(".")[-1]) == 3:
             raw = raw.replace(".", "")
-        return float(raw)
+        return _aceptar(float(raw))
 
     numeros = re.findall(r"\d+", texto_norm)
     if not numeros:
@@ -308,7 +328,7 @@ def _extraer_presupuesto(texto: str) -> float | None:
     valor = float(numeros[0])
     if valor < 1_000_000:
         valor *= 1_000_000
-    return valor
+    return _aceptar(valor)
 
 
 def _extraer_nombre_apellido(texto: str) -> tuple[str | None, str | None]:
@@ -485,6 +505,14 @@ def _interpretar_presentacion(texto: str) -> PresentacionCliente:
     )
 
 
+def _sucursal_sesion_bot(sesion: SesionCliente) -> object | None:
+    return obtener_sucursal(sesion.agencia_id, sesion.sucursal_origen_id)
+
+
+def _vendedor_sesion_bot(sesion: SesionCliente) -> object | None:
+    return obtener_vendedor(sesion.agencia_id, sesion.vendedor_origen_id)
+
+
 def _enviar_bienvenida_inicial(
     sesion: SesionCliente,
     agencia: Agencia,
@@ -493,10 +521,14 @@ def _enviar_bienvenida_inicial(
     """Saludo personalizado al iniciar conversación (solo si no hay historial)."""
     if sesion.historial:
         return False
-    mensaje = mensaje_bienvenida_agencia(agencia)
+    sucursal = _sucursal_sesion_bot(sesion)
+    vendedor = _vendedor_sesion_bot(sesion)
+    mensaje = mensaje_bienvenida_agencia(agencia, sucursal, vendedor)
     sesion.historial.append(f"Bot: {mensaje}")
     _persistir_mensaje(sesion, "bot", mensaje)
-    _entregar_respuesta_whatsapp(agencia, sesion.telefono, mensaje, via_whatsapp=via_whatsapp)
+    _entregar_respuesta_whatsapp(
+        agencia, sesion.telefono, mensaje, via_whatsapp=via_whatsapp, sesion=sesion
+    )
     return True
 
 
@@ -765,6 +797,14 @@ def _construir_directiva_vendedor(agencia: Agencia, sesion: SesionCliente) -> st
     if sesion.quiere_permuta:
         contexto_usado = f"\nDATOS DEL USADO YA MENCIONADOS: {resumen_usado_sesion(sesion)}"
     contexto_fotos = ""
+    contexto_sucursal = ""
+    if sesion.sucursal_origen_id:
+        nombre_suc = obtener_nombre_sucursal(sesion.agencia_id, sesion.sucursal_origen_id)
+        contexto_sucursal = (
+            f"\nSUCURSAL DE CONTACTO: El cliente escribió por WhatsApp de {nombre_suc}. "
+            "Al agendar una visita, proponé esa sede por defecto. Si elige un auto que está "
+            "en otra sucursal, ofrecé también coordinar turno en la sede donde está el vehículo."
+        )
     if sesion.auto_interes_id:
         auto = obtener_auto_por_id(sesion.agencia_id, sesion.auto_interes_id)
         if auto:
@@ -779,7 +819,7 @@ def _construir_directiva_vendedor(agencia: Agencia, sesion: SesionCliente) -> st
                 )
     return (
         f"{agencia.prompt_personalizado or ''}\n"
-        f"{contexto_cliente}{contexto_usado}{contexto_fotos}\n"
+        f"{contexto_cliente}{contexto_sucursal}{contexto_usado}{contexto_fotos}\n"
         f"{INSTRUCCIONES_PERMUTA}\n"
         "PERSONALIDAD CRÍTICA: Actuá como un vendedor de autos usados argentino, rápido, ágil, "
         "canchero y con mucha calle. Si el cliente te da una señal de compra clara (ej: 'tengo la plata'), "
@@ -798,8 +838,22 @@ def _extraer_datos_en_segundo_plano(sesion: SesionCliente, texto: str) -> None:
         sesion.presupuesto = presupuesto
 
     autos = buscar_autos_por_texto(sesion.agencia_id, texto)
-    if len(autos) == 1:
-        sesion.auto_interes_id = autos[0].id
+    if autos:
+        match_id = re.search(r"\bid\s*(\d+)\b", texto_norm)
+        if match_id:
+            auto_id = int(match_id.group(1))
+            for auto in autos:
+                if auto.id == auto_id:
+                    sesion.auto_interes_id = auto.id
+                    break
+        elif len(autos) == 1:
+            sesion.auto_interes_id = autos[0].id
+        else:
+            match_opcion = re.search(r"\b(opci[oó]n|numero|n[úu]mero)\s*(\d+)\b", texto_norm)
+            if match_opcion:
+                indice = int(match_opcion.group(2))
+                if 1 <= indice <= len(autos):
+                    sesion.auto_interes_id = autos[indice - 1].id
 
     extraer_datos_usado_en_segundo_plano(sesion, texto)
 
@@ -833,14 +887,16 @@ def _procesar_mensaje(
         _persistir_mensaje(sesion, "cliente", etiqueta_cliente or mensaje.strip())
         sesion.historial.append(f"Bot: {bloqueo}")
         _persistir_mensaje(sesion, "bot", bloqueo)
-        _entregar_respuesta_whatsapp(agencia, sesion.telefono, bloqueo, via_whatsapp=via_whatsapp)
+        _entregar_respuesta_whatsapp(
+            agencia, sesion.telefono, bloqueo, via_whatsapp=via_whatsapp, sesion=sesion
+        )
         return bloqueo
 
     texto = mensaje.strip()
     if not texto:
         respuesta_vacia = "Pasame un dato, ¿qué auto estás buscando?"
         _entregar_respuesta_whatsapp(
-            agencia, sesion.telefono, respuesta_vacia, via_whatsapp=via_whatsapp
+            agencia, sesion.telefono, respuesta_vacia, via_whatsapp=via_whatsapp, sesion=sesion
         )
         return respuesta_vacia
 
@@ -849,11 +905,24 @@ def _procesar_mensaje(
     _extraer_datos_en_segundo_plano(sesion, texto)
 
     inventario = obtener_inventario_agencia(sesion.agencia_id)
+    directivas = _construir_directiva_vendedor(agencia, sesion)
+    if _tiene_consulta_comercial(_normalizar_texto(texto)):
+        coincidencias = buscar_autos_por_texto(sesion.agencia_id, texto)
+        if coincidencias:
+            bloque_stock = formatear_opciones_stock_cruzado(
+                coincidencias,
+                sesion.agencia_id,
+                sesion.sucursal_origen_id,
+            )
+            directivas = f"{directivas}\n\n{bloque_stock}"
+
     prompt_sistema = generar_prompt_maestro(
-        nombre_agencia=obtener_nombre_agencia_bot(agencia),
+        nombre_agencia=obtener_nombre_agencia_bot(
+            agencia, _sucursal_sesion_bot(sesion), _vendedor_sesion_bot(sesion)
+        ),
         inventario_texto=inventario,
         contexto_temporal=_generar_contexto_temporal(),
-        directivas=_construir_directiva_vendedor(agencia, sesion),
+        directivas=directivas,
     )
 
     try:
@@ -902,7 +971,7 @@ def _procesar_mensaje(
                 respuesta_bot = f"{respuesta_bot}\n\n{bloque_fotos}"
 
     _entregar_respuesta_whatsapp(
-        agencia, sesion.telefono, respuesta_bot, via_whatsapp=via_whatsapp
+        agencia, sesion.telefono, respuesta_bot, via_whatsapp=via_whatsapp, sesion=sesion
     )
     return respuesta_bot
 
@@ -934,6 +1003,8 @@ def _finalizar_y_guardar_lead(sesion: SesionCliente) -> int | None:
         usado_vtv_vigente=sesion.usado_vtv_vigente,
         usado_es_titular=sesion.usado_es_titular,
         lead_id=sesion.lead_id,
+        sucursal_id=sesion.sucursal_origen_id,
+        vendedor_id=sesion.vendedor_origen_id,
     )
     sesion.lead_id = lead_id
     vincular_mensajes_a_lead(sesion.agencia_id, sesion.telefono, lead_id)

@@ -1,27 +1,342 @@
 {% extends "dashboard/base.html" %}
-{% block title %}Inicio — {{ agencia.nombre }}{% endblock %}
+{% from "dashboard/macros.html" import empty_state %}
+{% block title %}Inicio — Agenda · {{ agencia.nombre }}{% endblock %}
 {% block content %}
-<div class="page-header">
-  <h1 class="page-title">Inicio</h1>
-  <p class="page-subtitle">{{ agencia.nombre }}</p>
+<div class="page-header flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+  <div>
+    <h1 class="page-title">Inicio — Agenda</h1>
+    <p class="page-subtitle">{{ sucursal_activa.nombre }} · resumen del día</p>
+  </div>
+  <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
+    <label class="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">
+      <span class="text-xs font-medium uppercase tracking-wide" style="color: var(--muted);">Sucursal</span>
+      <select id="selector-sucursal" class="ui-select min-w-[11rem]">
+        {% for suc in sucursales %}
+        <option value="{{ suc.id }}" {% if suc.id == sucursal_activa.id %}selected{% endif %}>{{ suc.nombre }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <a href="/dashboard/{{ agencia.id }}/citas?sucursal={{ sucursal_activa.id }}"
+       class="text-sm font-medium text-brand hover:underline sm:ml-1">
+      Ver agenda completa →
+    </a>
+  </div>
 </div>
 
-<div class="grid w-full gap-4 sm:grid-cols-2 lg:grid-cols-4 lg:gap-5">
-  <a href="/dashboard/{{ agencia.id }}/inventario" class="kpi-card">
-    <p class="kpi-value">{{ total_autos }}</p>
-    <p class="kpi-label">Total stock</p>
+<div class="grid w-full gap-3 sm:grid-cols-2 lg:grid-cols-4 lg:gap-4">
+  <a href="/dashboard/{{ agencia.id }}/inventario?sucursal={{ sucursal_activa.id }}" class="kpi-card">
+    <div class="kpi-card-head">Stock</div>
+    <div class="kpi-card-body">
+      <p class="kpi-value">{{ total_autos }}</p>
+      <p class="kpi-label">Total stock</p>
+    </div>
   </a>
-  <a href="/dashboard/{{ agencia.id }}/inventario?estado=disponible" class="kpi-card">
-    <p class="kpi-value">{{ disponibles }}</p>
-    <p class="kpi-label">Disponibles</p>
+  <a href="/dashboard/{{ agencia.id }}/inventario?estado=disponible&sucursal={{ sucursal_activa.id }}" class="kpi-card">
+    <div class="kpi-card-head">Disponibles</div>
+    <div class="kpi-card-body">
+      <p class="kpi-value">{{ disponibles }}</p>
+      <p class="kpi-label">En venta</p>
+    </div>
   </a>
-  <a href="/dashboard/{{ agencia.id }}/leads" class="kpi-card">
-    <p class="kpi-value">{{ total_leads }}</p>
-    <p class="kpi-label">Leads</p>
+  <a href="/dashboard/{{ agencia.id }}/leads?sucursal={{ sucursal_activa.id }}" class="kpi-card">
+    <div class="kpi-card-head">Leads</div>
+    <div class="kpi-card-body">
+      <p class="kpi-value">{{ total_leads }}</p>
+      <p class="kpi-label">Prospectos</p>
+    </div>
   </a>
-  <a href="/dashboard/{{ agencia.id }}/citas" class="kpi-card">
-    <p class="kpi-value">{{ citas_hoy }}</p>
-    <p class="kpi-label">Citas hoy</p>
+  <a href="/dashboard/{{ agencia.id }}/citas?sucursal={{ sucursal_activa.id }}" class="kpi-card">
+    <div class="kpi-card-head">Agenda</div>
+    <div class="kpi-card-body">
+      <p class="kpi-value">{{ citas_hoy }}</p>
+      <p class="kpi-label">Citas hoy</p>
+    </div>
   </a>
 </div>
+
+<section class="ui-card mt-5 p-5 sm:p-6">
+  <div class="section-head-brand">
+    <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <h2 class="text-base font-semibold">Agenda de hoy</h2>
+        <p class="mt-0.5 text-sm">{{ fecha_hoy }} · {{ sucursal_activa.nombre }}</p>
+      </div>
+      <span class="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold"
+            style="background: rgba(255,255,255,0.18); color: #fff; border: 1px solid rgba(255,255,255,0.35);">
+        {{ citas_hoy_lista|length }} cita{% if citas_hoy_lista|length != 1 %}s{% endif %}
+      </span>
+    </div>
+  </div>
+
+  {% if citas_hoy_lista %}
+  <ul class="divide-y" style="border-color: var(--border);">
+    {% for cita in citas_hoy_lista %}
+    <li>
+      <button type="button" class="cita-item group flex w-full flex-col gap-3 border-l-4 py-4 pl-4 pr-2 text-left transition hover:opacity-90 sm:flex-row sm:items-center sm:justify-between"
+              data-cita-id="{{ cita.id }}" style="border-color: var(--brand);">
+        <div class="min-w-0">
+          <p class="font-medium group-hover:text-brand transition" style="color: var(--title);">{{ cita.cliente }}</p>
+          <p class="mt-1 text-sm" style="color: var(--muted);">{{ cita.auto }}</p>
+          <p class="mt-1 text-xs" style="color: var(--muted);">Tel: {{ cita.telefono }}</p>
+          <p class="mt-2 text-xs text-brand opacity-0 group-hover:opacity-100 transition">Ver conversación →</p>
+        </div>
+        <div class="flex shrink-0 items-center gap-3 sm:flex-col sm:items-end">
+          <span class="rounded-lg px-2.5 py-1 text-sm font-semibold text-brand"
+                style="background: color-mix(in srgb, var(--brand) 18%, transparent);">
+            {{ cita.hora }} hs
+          </span>
+          <span class="estado-badge {% if cita.estado|lower == 'confirmada' %}estado-disponible{% else %}estado-otro{% endif %}">
+            {{ cita.estado }}
+          </span>
+        </div>
+      </button>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  {{ empty_state('No hay citas para hoy en esta sucursal', 'Las visitas agendadas por el bot aparecerán acá automáticamente.', 'calendar') }}
+  {% endif %}
+</section>
+
+<section class="ui-card mt-6 p-5 sm:p-6">
+  <div class="section-head-brand">
+    <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+      <div>
+        <h2 class="text-base font-semibold">Próximas Citas Predictivas</h2>
+        <p class="mt-0.5 text-sm" id="predictivas-rango-texto">Próxima semana · {{ sucursal_activa.nombre }}</p>
+      </div>
+      <div class="filter-pill-group shrink-0" role="group" aria-label="Rango temporal">
+        <button type="button" class="filter-pill active" data-rango="semana">Próxima Semana</button>
+        <button type="button" class="filter-pill" data-rango="15dias">Próximos 15 Días</button>
+        <button type="button" class="filter-pill" data-rango="mes">Próximo Mes</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="predictivas-cargando" class="hidden py-6 text-center text-sm" style="color: var(--muted);">
+    Cargando turnos...
+  </div>
+  <div id="predictivas-lista" class="agenda-feed-list"></div>
+  <div id="predictivas-vacio" class="hidden">
+    {{ empty_state('Sin citas en este rango', 'No hay turnos programados para el período seleccionado.', 'calendar') }}
+  </div>
+</section>
+
+<div id="modal-historial" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/70 p-3 sm:p-5 backdrop-blur-sm">
+  <div class="modal-historial-shell ui-card flex max-h-[92vh] w-full flex-col shadow-2xl" style="overflow:hidden;">
+    <div class="modal-head-brand">
+      <div class="flex items-start justify-between gap-4">
+        <div class="min-w-0 flex-1">
+          <h3 id="modal-titulo" class="text-lg font-semibold leading-tight sm:text-xl">Conversación</h3>
+          <p id="modal-subtitulo" class="mt-0.5 text-sm"></p>
+          <ul id="modal-resumen" class="mt-3 flex flex-wrap gap-2 text-xs"></ul>
+        </div>
+        <button type="button" id="modal-cerrar" class="close-btn" aria-label="Cerrar">&times;</button>
+      </div>
+    </div>
+    <div id="modal-cargando" class="hidden px-8 py-10 text-center text-sm" style="color: var(--muted);">Cargando historial...</div>
+    <div id="modal-chat" class="min-h-0 flex-1 space-y-3 overflow-y-auto px-6 py-5 sm:px-10"></div>
+    <div class="shrink-0 border-t px-6 py-2.5 text-xs sm:px-8" style="border-color: var(--border); color: var(--muted);">
+      Historial de WhatsApp vinculado al teléfono del cliente · Patente visible solo para el asesor
+    </div>
+  </div>
+</div>
+
+<script>
+  (function () {
+    const agenciaId = {{ agencia.id }};
+    const sucursalId = {{ sucursal_activa.id }};
+    const selectorSucursal = document.getElementById('selector-sucursal');
+    const pills = document.querySelectorAll('[data-rango]');
+    const lista = document.getElementById('predictivas-lista');
+    const vacio = document.getElementById('predictivas-vacio');
+    const cargando = document.getElementById('predictivas-cargando');
+    const rangoTexto = document.getElementById('predictivas-rango-texto');
+    let citasInicial = {{ citas_predictivas_inicial | tojson }};
+    let rangoActivo = {{ rango_predictivo_default | tojson }};
+
+    const RANGO_ETIQUETAS = {
+      semana: 'Próxima semana',
+      '15dias': 'Próximos 15 días',
+      mes: 'Próximo mes',
+    };
+
+    if (selectorSucursal) {
+      selectorSucursal.addEventListener('change', function () {
+        window.location.href = '/dashboard/' + agenciaId + '?sucursal=' + encodeURIComponent(this.value);
+      });
+    }
+
+    function escHtml(texto) {
+      const d = document.createElement('div');
+      d.textContent = texto == null ? '' : String(texto);
+      return d.innerHTML;
+    }
+
+    function renderCitaItem(cita) {
+      return (
+        '<li><button type="button" class="cita-item group w-full rounded-lg py-4 pl-3 pr-2 text-left transition hover:opacity-90" data-cita-id="' + cita.id + '" style="border-bottom:1px solid var(--border); border-left:4px solid var(--brand);">' +
+        '<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">' +
+        '<div class="min-w-0">' +
+        '<p class="font-medium group-hover:text-brand transition" style="color: var(--title);">' + escHtml(cita.cliente) + '</p>' +
+        '<p class="mt-1 text-sm" style="color: var(--muted);">' + escHtml(cita.auto) + '</p>' +
+        '<p class="mt-1 text-xs" style="color: var(--muted);">Tel: ' + escHtml(cita.telefono) + '</p>' +
+        '<p class="mt-2 text-xs text-brand opacity-0 group-hover:opacity-100 transition">Ver conversación →</p>' +
+        '</div>' +
+        '<div class="flex shrink-0 items-center gap-3 sm:flex-col sm:items-end">' +
+        '<span class="text-sm font-medium tabular-nums" style="color: var(--title);">' + escHtml(cita.fecha) + '</span>' +
+        '<span class="rounded-lg px-2.5 py-1 text-sm font-semibold text-brand" style="background: color-mix(in srgb, var(--brand) 18%, transparent);">' +
+        escHtml(cita.hora) + ' hs</span>' +
+        '<span class="estado-badge estado-otro">' + escHtml(cita.estado) + '</span>' +
+        '</div></div></button></li>'
+      );
+    }
+
+    function aplicarScrollAgenda(contenedor, cantidad) {
+      contenedor.classList.remove('agenda-feed-list--scrollable');
+      if (cantidad > 4) {
+        contenedor.classList.add('agenda-feed-list--scrollable');
+      }
+    }
+
+    function renderLista(citas) {
+      if (!citas.length) {
+        lista.classList.remove('agenda-feed-list--scrollable');
+        lista.innerHTML = '';
+        vacio.classList.remove('hidden');
+        return;
+      }
+      vacio.classList.add('hidden');
+      lista.innerHTML = '<ul class="divide-y" style="border-color: var(--border);">' +
+        citas.map(renderCitaItem).join('') + '</ul>';
+      aplicarScrollAgenda(lista, citas.length);
+    }
+
+    function actualizarPills(rango) {
+      pills.forEach(function (pill) {
+        pill.classList.toggle('active', pill.dataset.rango === rango);
+      });
+      if (rangoTexto) {
+        rangoTexto.textContent = (RANGO_ETIQUETAS[rango] || rango) + ' · {{ sucursal_activa.nombre }}';
+      }
+    }
+
+    async function cargarRango(rango) {
+      rangoActivo = rango;
+      actualizarPills(rango);
+      cargando.classList.remove('hidden');
+      vacio.classList.add('hidden');
+      lista.innerHTML = '';
+
+      try {
+        const params = new URLSearchParams({ rango: rango, sucursal: String(sucursalId) });
+        const res = await fetch('/dashboard/' + agenciaId + '/citas/predictivas?' + params.toString());
+        if (!res.ok) throw new Error();
+        const data = await res.json();
+        renderLista(data.citas || []);
+      } catch (_) {
+        lista.innerHTML = '<p class="py-4 text-center text-sm" style="color: var(--muted);">No se pudieron cargar las citas predictivas.</p>';
+      } finally {
+        cargando.classList.add('hidden');
+      }
+    }
+
+    pills.forEach(function (pill) {
+      pill.addEventListener('click', function () {
+        if (pill.dataset.rango === rangoActivo) return;
+        cargarRango(pill.dataset.rango);
+      });
+    });
+
+    actualizarPills(rangoActivo);
+    renderLista(citasInicial);
+
+    const modal = document.getElementById('modal-historial');
+    const modalTitulo = document.getElementById('modal-titulo');
+    const modalSubtitulo = document.getElementById('modal-subtitulo');
+    const modalResumen = document.getElementById('modal-resumen');
+    const modalChat = document.getElementById('modal-chat');
+    const modalCargando = document.getElementById('modal-cargando');
+    const modalCerrar = document.getElementById('modal-cerrar');
+
+    function cerrarModal() {
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+      modalChat.innerHTML = '';
+      modalResumen.innerHTML = '';
+    }
+
+    function renderMensaje(msg) {
+      const esCliente = msg.rol === 'cliente';
+      const wrap = document.createElement('div');
+      wrap.className = 'flex ' + (esCliente ? 'justify-start' : 'justify-end');
+      const burbuja = document.createElement('div');
+      burbuja.className = 'max-w-[72%] rounded-2xl px-4 py-2.5 text-sm ' + (
+        esCliente ? 'rounded-bl-md bg-slate-800 text-slate-100' : 'rounded-br-md bg-brand/25 text-white ring-1 ring-brand/30'
+      );
+      const texto = document.createElement('p');
+      texto.className = 'whitespace-pre-wrap break-words';
+      texto.textContent = msg.texto;
+      burbuja.appendChild(texto);
+      if (msg.fecha) {
+        const fecha = document.createElement('p');
+        fecha.className = 'mt-1 text-right text-[10px] opacity-60';
+        fecha.textContent = msg.fecha;
+        burbuja.appendChild(fecha);
+      }
+      wrap.appendChild(burbuja);
+      return wrap;
+    }
+
+    function renderResumenHistorial(contenedor, items) {
+      contenedor.innerHTML = '';
+      if (!items || !items.length) return;
+      items.forEach(function (item) {
+        const li = document.createElement('li');
+        li.className = 'rounded-full px-2.5 py-1 leading-snug';
+        li.style.background = 'rgba(255,255,255,0.14)';
+        li.style.color = '#fff';
+        li.style.border = '1px solid rgba(255,255,255,0.22)';
+        li.textContent = item;
+        contenedor.appendChild(li);
+      });
+    }
+
+    async function abrirHistorial(citaId) {
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+      modalCargando.classList.remove('hidden');
+      modalChat.innerHTML = '';
+      modalResumen.innerHTML = '';
+      try {
+        const res = await fetch('/dashboard/' + agenciaId + '/citas/' + citaId + '/historial');
+        if (!res.ok) throw new Error();
+        const data = await res.json();
+        modalTitulo.textContent = data.cliente;
+        modalSubtitulo.textContent = data.fecha_cita + ' · ' + data.hora_cita + ' hs · Tel. ' + data.telefono;
+        renderResumenHistorial(modalResumen, data.resumen && data.resumen.items ? data.resumen.items : []);
+        if (!data.mensajes || !data.mensajes.length) {
+          modalChat.innerHTML = '<p class="py-8 text-center text-sm text-slate-500">Todavía no hay mensajes guardados para este cliente.</p>';
+        } else {
+          data.mensajes.forEach(function (msg) { modalChat.appendChild(renderMensaje(msg)); });
+        }
+      } catch (_) {
+        modalChat.innerHTML = '<p class="py-8 text-center text-sm text-red-400">Error al cargar el historial.</p>';
+      } finally {
+        modalCargando.classList.add('hidden');
+      }
+    }
+
+    document.addEventListener('click', function (e) {
+      const btn = e.target.closest('.cita-item');
+      if (btn && btn.dataset.citaId) {
+        abrirHistorial(btn.dataset.citaId);
+      }
+    });
+
+    modalCerrar.addEventListener('click', cerrarModal);
+    modal.addEventListener('click', function (e) { if (e.target === modal) cerrarModal(); });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') cerrarModal(); });
+  })();
+</script>
 {% endblock %}

@@ -35,6 +35,7 @@ from api_whatsapp import router as whatsapp_router
 from auth.middleware import MiddlewareAutenticacion
 from auth.routes import router as auth_router
 from dashboard.routes import router as dashboard_router
+from dashboard.middleware_sucursal import MiddlewareSucursalActiva
 
 from middleware_bot import MiddlewareAgenciaActiva
 
@@ -75,6 +76,7 @@ app = FastAPI(title="Bot Agencias Multi-Tenant", version="0.5.0", lifespan=lifes
 
 app.add_middleware(MiddlewareAutenticacion)
 app.add_middleware(MiddlewareAgenciaActiva)
+app.add_middleware(MiddlewareSucursalActiva)
 
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
@@ -115,7 +117,8 @@ def health():
 
         "suscripcion_cron": "activo",
         "mercadopago_webhook": "/api/mercadopago/webhook",
-        "whatsapp_webhook": "/webhook/whatsapp/{phone_number_id}",
+        "whatsapp_webhook": "/webhook",
+        "whatsapp_webhook_legacy": "/webhook/whatsapp/{phone_number_id}",
 
     }
 

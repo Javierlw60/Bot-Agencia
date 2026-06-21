@@ -24,11 +24,13 @@ GRAPH_API_BASE = f"https://graph.facebook.com/{GRAPH_API_VERSION}"
 
 
 def _modo_whatsapp() -> str:
-    return os.getenv("WHATSAPP_MODO", "consola").lower()
+    from whatsapp_config import whatsapp_modo
+    return whatsapp_modo()
 
 
 def _token() -> str:
-    return os.getenv("WHATSAPP_ACCESS_TOKEN", "").strip()
+    from whatsapp_config import whatsapp_access_token
+    return whatsapp_access_token()
 
 
 def _normalizar_telefono(telefono: str) -> str:

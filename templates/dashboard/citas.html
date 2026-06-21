@@ -1,12 +1,21 @@
 {% extends "dashboard/base.html" %}
+{% from "dashboard/macros.html" import empty_state %}
 {% block title %}Citas — {{ agencia.nombre }}{% endblock %}
 {% block content %}
 <div class="page-header flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
   <div>
     <h1 class="page-title">Citas</h1>
-    <p class="page-subtitle">Visitas agendadas en tiempo real. Hacé clic en una cita para ver la conversación.</p>
+    <p class="page-subtitle">{{ sucursal_activa.nombre }} · visitas agendadas en tiempo real</p>
   </div>
   <div class="flex flex-wrap items-center gap-2">
+    <label class="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">
+      <span class="text-xs font-medium uppercase tracking-wide" style="color: var(--muted);">Sucursal</span>
+      <select id="selector-sucursal-citas" class="ui-select min-w-[11rem]">
+        {% for suc in sucursales %}
+        <option value="{{ suc.id }}" {% if suc.id == sucursal_activa.id %}selected{% endif %}>{{ suc.nombre }}</option>
+        {% endfor %}
+      </select>
+    </label>
     <span id="indicador-vivo" class="ui-card inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium" style="color: #6ee7b7;">
       <span class="relative flex h-2 w-2">
         <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
@@ -26,40 +35,261 @@
   </div>
 </div>
 
-<div class="grid gap-4 lg:grid-cols-2 lg:gap-5">
-  <section class="ui-card p-5 sm:p-6">
-    <h2 class="text-base font-semibold" id="titulo-hoy" style="color: var(--title);">Hoy</h2>
-    <div id="lista-hoy" class="mt-4"></div>
+<div class="grid gap-3 lg:grid-cols-2 lg:items-start">
+  <section class="ui-card card-compact p-4">
+    <div class="section-head-brand">
+      <h2 class="text-base font-semibold" id="titulo-hoy">Hoy</h2>
+    </div>
+    <div id="lista-hoy" class="agenda-feed-list mt-2"></div>
   </section>
-  <section class="ui-card p-5 sm:p-6">
-    <h2 class="text-base font-semibold" id="titulo-manana" style="color: var(--title);">Mañana</h2>
-    <div id="lista-manana" class="mt-4"></div>
+  <section class="ui-card card-compact p-4">
+    <div class="section-head-brand">
+      <h2 class="text-base font-semibold" id="titulo-manana">Mañana</h2>
+    </div>
+    <div id="lista-manana" class="agenda-feed-list mt-2"></div>
   </section>
 </div>
 
-<div id="modal-historial" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-  <div class="ui-card flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden shadow-2xl">
-    <div class="flex items-start justify-between border-b px-5 py-4" style="border-color: var(--border);">
-      <div>
-        <h3 id="modal-titulo" class="text-lg font-semibold" style="color: var(--title);">Conversación</h3>
-        <p id="modal-subtitulo" class="mt-1 text-sm" style="color: var(--muted);"></p>
-        <ul id="modal-resumen" class="mt-2 flex flex-wrap gap-2 text-xs"></ul>
-      </div>
-      <button type="button" id="modal-cerrar"
-              class="rounded-lg p-2 transition hover:opacity-80" style="color: var(--muted);">&times;</button>
+<section class="ui-card card-compact mt-3 overflow-hidden p-4">
+  <div class="section-head-brand">
+    <div>
+      <h2 class="text-base font-semibold">Buscador Avanzado de Citas (Historial y Activas)</h2>
+      <p class="mt-0.5 text-sm">Filtrá por teléfono, nombre, apellido, fecha o sucursal</p>
     </div>
-    <div id="modal-cargando" class="hidden px-5 py-8 text-center text-sm" style="color: var(--muted);">Cargando historial...</div>
-    <div id="modal-chat" class="flex-1 space-y-3 overflow-y-auto px-5 py-4"></div>
-    <div class="border-t px-5 py-3 text-xs" style="border-color: var(--border); color: var(--muted);">
-      Historial de WhatsApp vinculado al teléfono del cliente
+  </div>
+
+  <form id="form-buscar-citas" class="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+    <label class="block">
+      <span class="ui-label">Teléfono</span>
+      <input type="search" name="telefono" id="buscar-telefono" inputmode="tel" autocomplete="off"
+             placeholder="Ej: 1163052331" class="ui-input">
+    </label>
+    <label class="block">
+      <span class="ui-label">Nombre</span>
+      <input type="search" name="nombre" id="buscar-nombre" autocomplete="off"
+             placeholder="Ej: Martín" class="ui-input">
+    </label>
+    <label class="block">
+      <span class="ui-label">Apellido</span>
+      <input type="search" name="apellido" id="buscar-apellido" autocomplete="off"
+             placeholder="Ej: Rodríguez" class="ui-input">
+    </label>
+    <label class="block">
+      <span class="ui-label">Fecha</span>
+      <input type="date" name="fecha" id="buscar-fecha" class="ui-input">
+    </label>
+    <label class="block">
+      <span class="ui-label">Sucursal</span>
+      <select name="sucursal" id="buscar-sucursal" class="ui-select w-full">
+        <option value="">Todas las sucursales</option>
+        {% for suc in sucursales %}
+        <option value="{{ suc.id }}">{{ suc.nombre }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="block">
+      <span class="ui-label">Vendedor</span>
+      <select name="vendedor" id="buscar-vendedor" class="ui-select w-full" disabled>
+        <option value="">Todos los vendedores</option>
+      </select>
+    </label>
+    <div class="flex items-end gap-2">
+      <button type="submit" class="btn-primary w-full">Buscar</button>
+      <button type="button" id="btn-limpiar-busqueda"
+              class="rounded-md px-3 py-2 text-sm transition hover:opacity-90"
+              style="color: var(--muted); border: 1px solid var(--border);">
+        Limpiar
+      </button>
+    </div>
+  </form>
+
+  <div id="buscar-estado" class="mt-4 hidden text-sm" style="color: var(--muted);"></div>
+
+  <div id="buscar-resultados" class="mt-4 hidden">
+    <div class="table-responsive">
+      <table class="w-full text-sm">
+        <thead class="table-head-brand">
+          <tr>
+            <th class="px-3 py-2.5 text-left">Cliente</th>
+            <th class="px-3 py-2.5 text-left">Teléfono</th>
+            <th class="px-3 py-2.5 text-left">Fecha</th>
+            <th class="px-3 py-2.5 text-left">Hora</th>
+            <th class="px-3 py-2.5 text-left">Interés</th>
+            <th class="px-3 py-2.5 text-left">Sucursal</th>
+            <th class="px-3 py-2.5 text-left">Vendedor</th>
+            <th class="px-3 py-2.5 text-left">Estado</th>
+            <th class="px-3 py-2.5 text-center w-12">WA</th>
+          </tr>
+        </thead>
+        <tbody id="buscar-resultados-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="buscar-vacio" class="mt-4 hidden">
+    {{ empty_state('Sin resultados', 'Probá con otro teléfono, nombre o apellido.', 'search') }}
+  </div>
+</section>
+
+<div class="mt-3 grid gap-3 lg:grid-cols-3 lg:gap-4">
+  <section class="ui-card card-compact min-w-0 overflow-hidden p-4 lg:col-span-2">
+    <div class="section-head-brand">
+      <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 class="text-base font-semibold">Volumen de citas</h2>
+          <p class="mt-0.5 text-sm">Movimiento de clientes por período</p>
+        </div>
+        <div class="filter-pill-group shrink-0" role="group" aria-label="Vista del gráfico">
+          <button type="button" class="filter-pill active" data-vista-grafico="semanal">Vista Semanal</button>
+          <button type="button" class="filter-pill" data-vista-grafico="mensual">Vista Mensual</button>
+        </div>
+      </div>
+    </div>
+    <div id="grafico-scroll" class="mt-2 w-full overflow-hidden">
+      <div id="grafico-wrap" class="relative h-44 w-full sm:h-52">
+        <canvas id="grafico-citas" aria-label="Gráfico de volumen de citas"></canvas>
+      </div>
+    </div>
+    <div id="grafico-leyenda" class="mt-3 flex flex-wrap gap-x-4 gap-y-1.5 text-xs" style="color: var(--muted);"></div>
+  </section>
+
+  <section class="ui-card card-compact min-w-0 overflow-hidden p-4">
+    <div class="section-head-brand">
+      <div class="flex items-center justify-between gap-2">
+        <button type="button" id="cal-prev" class="cal-nav-btn" aria-label="Mes anterior">&#8249;</button>
+        <div class="flex min-w-0 flex-1 items-center justify-center gap-2">
+          <select id="cal-mes-select" class="cal-sel" aria-label="Mes">
+            <option value="1">Enero</option>
+            <option value="2">Febrero</option>
+            <option value="3">Marzo</option>
+            <option value="4">Abril</option>
+            <option value="5">Mayo</option>
+            <option value="6">Junio</option>
+            <option value="7">Julio</option>
+            <option value="8">Agosto</option>
+            <option value="9">Septiembre</option>
+            <option value="10">Octubre</option>
+            <option value="11">Noviembre</option>
+            <option value="12">Diciembre</option>
+          </select>
+          <input type="number" id="cal-anio-input" class="cal-anio" value="2026"
+                 min="2000" max="2100" step="1" inputmode="numeric" aria-label="Año">
+        </div>
+        <button type="button" id="cal-next" class="cal-nav-btn" aria-label="Mes siguiente">&#8250;</button>
+      </div>
+    </div>
+    <div class="mt-3 grid grid-cols-7 gap-1 text-center text-[10px] font-semibold uppercase tracking-wide" style="color: var(--muted);">
+      <span>L</span><span>M</span><span>X</span><span>J</span><span>V</span><span>S</span><span>D</span>
+    </div>
+    <div id="mini-calendario" class="mt-1 grid grid-cols-7 gap-1"></div>
+    <p class="mt-3 flex items-center gap-2 text-xs" style="color: var(--muted);">
+      <span class="inline-block h-3 w-3 rounded" style="background: color-mix(in srgb, var(--brand) 35%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--brand) 50%, transparent);"></span>
+      Día con citas agendadas · clic para detalle
+    </p>
+  </section>
+</div>
+
+<section class="ui-card card-compact mt-3 min-w-0 overflow-hidden p-4">
+  <div class="section-head-brand">
+    <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+      <div>
+        <h2 class="text-base font-semibold">Desempeño de vendedores</h2>
+        <p class="mt-0.5 text-sm">Embudo de conversión · <span id="est-rango"></span></p>
+      </div>
+      <div class="flex flex-wrap items-center gap-3">
+        <label class="flex items-center gap-2">
+          <span class="text-xs font-medium uppercase tracking-wide" style="color: var(--muted);">Sucursal</span>
+          <select id="est-sucursal" class="ui-select min-w-[10rem]">
+            <option value="">Todas</option>
+            {% for suc in sucursales %}
+            <option value="{{ suc.id }}" {% if suc.id == sucursal_activa.id %}selected{% endif %}>{{ suc.nombre }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <div class="flex items-center gap-1.5" role="group" aria-label="Período">
+          <button type="button" class="periodo-tab activo" data-periodo="semanal">Semanal</button>
+          <button type="button" class="periodo-tab" data-periodo="mensual">Mensual</button>
+          <button type="button" class="periodo-tab" data-periodo="anual">Anual</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="est-totales" class="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4"></div>
+
+  <div id="est-podio" class="mt-4 hidden"></div>
+
+  <div class="mt-5">
+    <h3 class="mb-2 text-sm font-semibold" style="color: var(--title);">Ranking de desempeño</h3>
+    <div id="est-ranking"></div>
+  </div>
+</section>
+
+<div id="modal-dia-citas" class="fixed inset-0 z-40 hidden items-center justify-center bg-black/65 p-3 sm:p-5 backdrop-blur-sm">
+  <div class="modal-dia-shell ui-card flex flex-col shadow-2xl" style="overflow:clip;">
+    <div class="modal-head-brand">
+      <div class="flex items-center justify-between gap-4">
+        <div class="min-w-0 flex-1">
+          <h3 id="modal-dia-titulo" class="text-lg font-semibold leading-tight sm:text-xl">Agenda del día</h3>
+          <p id="modal-dia-subtitulo" class="mt-0.5 text-sm"></p>
+        </div>
+        <button type="button" id="modal-dia-cerrar" class="close-btn" aria-label="Cerrar">&times;</button>
+      </div>
+    </div>
+    <div id="modal-dia-cargando" class="hidden px-8 py-12 text-center text-sm" style="color: var(--muted);">Cargando turnos...</div>
+    <div id="modal-dia-lista" class="px-5 py-4 sm:px-8 sm:py-5"></div>
+  </div>
+</div>
+
+<div id="modal-historial" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/70 p-3 sm:p-5 backdrop-blur-sm">
+  <div class="modal-historial-shell ui-card flex max-h-[92vh] w-full flex-col shadow-2xl" style="overflow:hidden;">
+    <div class="modal-head-brand">
+      <div class="flex items-start justify-between gap-4">
+        <div class="min-w-0 flex-1">
+          <h3 id="modal-titulo" class="text-lg font-semibold leading-tight sm:text-xl">Conversación</h3>
+          <p id="modal-subtitulo" class="mt-0.5 text-sm"></p>
+          <a id="modal-wa-btn" href="#" target="_blank" rel="noopener noreferrer"
+             class="btn-wa-me btn-wa-me--header mt-2 hidden" title="Abrir WhatsApp del cliente">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.435 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+            WhatsApp
+          </a>
+          <ul id="modal-resumen" class="mt-3 flex flex-wrap gap-2 text-xs"></ul>
+          <div class="mt-3 flex flex-wrap items-center gap-2">
+            <span class="text-xs font-medium" style="color: rgba(255,255,255,0.85);">Estado de la venta:</span>
+            <span id="modal-estado-wrap" class="estado-select-wrap">
+              <select id="modal-estado" class="estado-select" aria-busy="false">
+                {% for clave, etiqueta in estados_cita %}
+                <option value="{{ clave }}">{{ etiqueta }}</option>
+                {% endfor %}
+              </select>
+              <span id="modal-estado-spinner" class="estado-spinner hidden" aria-hidden="true"></span>
+            </span>
+            <span id="modal-estado-msg" class="text-xs" style="color: rgba(255,255,255,0.8);"></span>
+          </div>
+        </div>
+        <button type="button" id="modal-cerrar" class="close-btn" aria-label="Cerrar">&times;</button>
+      </div>
+    </div>
+    <div id="modal-cargando" class="hidden px-8 py-10 text-center text-sm" style="color: var(--muted);">Cargando historial...</div>
+    <div id="modal-chat" class="min-h-0 flex-1 space-y-3 overflow-y-auto px-6 py-5 sm:px-10"></div>
+    <div class="shrink-0 border-t px-6 py-2.5 text-xs sm:px-8" style="border-color: var(--border); color: var(--muted);">
+      Historial de WhatsApp vinculado al teléfono del cliente · Patente visible solo para el asesor
     </div>
   </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script>
   (function () {
     const agenciaId = {{ agencia.id }};
+    const sucursalId = {{ sucursal_activa.id }};
     const feedInicial = {{ feed_inicial | tojson }};
+    const analitica = {{ analitica_citas | tojson }};
+    const estadisticasInicial = {{ estadisticas_inicial | tojson }};
+    const ESTADOS_LABELS = {{ estados_cita | tojson }}.reduce(function (acc, par) {
+      acc[par[0]] = par[1];
+      return acc;
+    }, {});
     const POLL_MS = 8000;
     const STORAGE_SILENCIO = 'citas_alertas_silenciadas';
 
@@ -76,10 +306,412 @@
     const chat = document.getElementById('modal-chat');
     const cargando = document.getElementById('modal-cargando');
     const btnCerrar = document.getElementById('modal-cerrar');
+    const estadoSelect = document.getElementById('modal-estado');
+    const estadoWrap = document.getElementById('modal-estado-wrap');
+    const estadoSpinner = document.getElementById('modal-estado-spinner');
+    const estadoMsg = document.getElementById('modal-estado-msg');
+    let citaActivaId = null;
+    let estadoGuardando = false;
+    const modalDia = document.getElementById('modal-dia-citas');
+    const modalDiaTitulo = document.getElementById('modal-dia-titulo');
+    const modalDiaSubtitulo = document.getElementById('modal-dia-subtitulo');
+    const modalDiaLista = document.getElementById('modal-dia-lista');
+    const modalDiaCargando = document.getElementById('modal-dia-cargando');
+    const btnModalDiaCerrar = document.getElementById('modal-dia-cerrar');
+    const modalWaBtn = document.getElementById('modal-wa-btn');
+
+    const WA_ICON_SM = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.435 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>';
+
+    function waMeUrl(telefono) {
+      if (!telefono) return null;
+      const digits = String(telefono).replace(/\D/g, '');
+      if (digits.length < 10) return null;
+      return 'https://wa.me/' + digits;
+    }
+
+    function btnWaMeHtml(telefono, opts) {
+      opts = opts || {};
+      const url = waMeUrl(telefono);
+      if (!url) return '';
+      const cls = 'btn-wa-me' + (opts.sm ? ' btn-wa-me--sm' : '') + (opts.extraClass ? ' ' + opts.extraClass : '');
+      const stop = opts.stopPropagation ? ' onclick="event.stopPropagation();"' : '';
+      return '<a href="' + url + '" target="_blank" rel="noopener noreferrer" class="' + cls + '" title="Abrir WhatsApp"' + stop + '>' + WA_ICON_SM + '</a>';
+    }
+
+    window.waMeUrl = waMeUrl;
+    window.btnWaMeHtml = btnWaMeHtml;
+
+    function actualizarModalWa(telefono) {
+      if (!modalWaBtn) return;
+      const url = waMeUrl(telefono);
+      if (url) {
+        modalWaBtn.href = url;
+        modalWaBtn.classList.remove('hidden');
+      } else {
+        modalWaBtn.classList.add('hidden');
+        modalWaBtn.href = '#';
+      }
+    }
 
     let citasConocidas = new Set();
     let feedInicializado = false;
     let audioCtx = null;
+    let chartCitas = null;
+    let vistaGrafico = 'semanal';
+    let diaCalendarioSeleccionado = null;
+    let calData = analitica.calendario;
+    let calCargando = false;
+
+    function isoLocal(d) {
+      return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    }
+
+    function brandColor(alpha) {
+      const raw = getComputedStyle(document.documentElement).getPropertyValue('--brand').trim() || '#3B82F6';
+      if (raw.startsWith('#')) {
+        const hex = raw.replace('#', '');
+        const full = hex.length === 3
+          ? hex.split('').map(function (c) { return c + c; }).join('')
+          : hex;
+        const r = parseInt(full.slice(0, 2), 16);
+        const g = parseInt(full.slice(2, 4), 16);
+        const b = parseInt(full.slice(4, 6), 16);
+        return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
+      }
+      return raw;
+    }
+
+    function renderMiniCalendario() {
+      const contenedor = document.getElementById('mini-calendario');
+      if (!contenedor || !calData) return;
+      const cal = calData;
+      const mesSel = document.getElementById('cal-mes-select');
+      const anioInput = document.getElementById('cal-anio-input');
+      if (mesSel) mesSel.value = String(cal.mes);
+      if (anioInput) anioInput.value = String(cal.anio);
+      const primerDia = new Date(cal.primer_dia + 'T12:00:00');
+      const ultimoDia = new Date(cal.ultimo_dia + 'T12:00:00');
+      const hoyIso = cal.hoy;
+      const ocupados = cal.dias_ocupados || {};
+      const offset = (primerDia.getDay() + 6) % 7;
+      const celdas = [];
+
+      for (let i = 0; i < offset; i++) {
+        celdas.push('<span class="mini-cal-day mini-cal-day--vacio"></span>');
+      }
+
+      for (let d = new Date(primerDia); d <= ultimoDia; d.setDate(d.getDate() + 1)) {
+        const iso = isoLocal(d);
+        const clases = ['mini-cal-day'];
+        if (iso === hoyIso) clases.push('mini-cal-day--hoy');
+        if (diaCalendarioSeleccionado === iso) clases.push('mini-cal-day--selected');
+        const cantidad = ocupados[iso] || 0;
+        const tituloDia = cantidad ? cantidad + ' cita(s)' : '';
+        if (cantidad) {
+          clases.push('mini-cal-day--ocupado');
+          celdas.push(
+            '<button type="button" class="' + clases.join(' ') + '" data-fecha="' + iso + '" title="' + tituloDia + '">' + d.getDate() + '</button>'
+          );
+        } else {
+          celdas.push('<span class="' + clases.join(' ') + '">' + d.getDate() + '</span>');
+        }
+      }
+
+      contenedor.innerHTML = celdas.join('');
+    }
+
+    function renderCitaItemModal(cita) {
+      const COL = 'style="color:var(--title); font-size:0.875rem; line-height:1.4;"';
+      const COL_BOLD = 'style="color:var(--title); font-size:0.9375rem; font-weight:600; line-height:1.4;"';
+
+      return (
+        '<li>' +
+        '<button type="button" class="cita-item modal-dia-card group w-full text-left" data-cita-id="' + cita.id + '">' +
+
+        '<div class="grid items-center gap-x-6" style="grid-template-columns: minmax(0,1.5fr) minmax(0,2fr) minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) 7rem 7.5rem;">' +
+
+        '<div class="min-w-0">' +
+        '<span class="modal-dia-field-label">Cliente</span>' +
+        '<p class="truncate transition group-hover:text-brand" ' + COL_BOLD + ' title="' + escHtml(cita.cliente) + '">' + escHtml(cita.cliente) + '</p>' +
+        '</div>' +
+
+        '<div class="min-w-0">' +
+        '<span class="modal-dia-field-label">Vehículo</span>' +
+        '<p class="truncate" ' + COL + ' title="' + escHtml(cita.auto) + '">' + escHtml(cita.auto) + '</p>' +
+        '</div>' +
+
+        '<div class="min-w-0">' +
+        '<span class="modal-dia-field-label">Patente</span>' +
+        '<p class="truncate tabular-nums" ' + COL + '>' + escHtml(cita.patente || 'Consultar') + '</p>' +
+        '</div>' +
+
+        '<div class="min-w-0">' +
+        '<span class="modal-dia-field-label">Teléfono</span>' +
+        '<p class="flex items-center gap-2 tabular-nums" ' + COL + '>' +
+        escHtml(cita.telefono) + btnWaMeHtml(cita.telefono, { sm: true, stopPropagation: true }) +
+        '</p>' +
+        '</div>' +
+
+        '<div class="min-w-0">' +
+        '<span class="modal-dia-field-label">Vendedor</span>' +
+        '<p class="truncate" ' + COL + ' title="' + escHtml(cita.vendedor || '') + '">' + escHtml(cita.vendedor || '—') + '</p>' +
+        '</div>' +
+
+        '<div>' +
+        '<span class="modal-dia-field-label">Hora</span>' +
+        '<p class="inline-block rounded-lg px-2.5 py-1 font-bold tabular-nums text-brand" style="font-size:0.875rem; background: color-mix(in srgb, var(--brand) 16%, transparent); white-space:nowrap;">' + escHtml(cita.hora) + ' hs</p>' +
+        '</div>' +
+
+        '<div class="text-right">' +
+        '<span class="modal-dia-field-label">Estado</span>' +
+        '<p class="mt-0.5"><span class="estado-badge estado-' + escHtml(cita.estado || 'pendiente') + '">' + escHtml(cita.estado_label || cita.estado || '—') + '</span></p>' +
+        '</div>' +
+
+        '</div>' +
+        '<p class="mt-2.5 text-xs font-medium text-brand opacity-0 transition group-hover:opacity-100">Ver conversación →</p>' +
+        '</button></li>'
+      );
+    }
+
+    function cerrarModalDia() {
+      modalDia.classList.add('hidden');
+      modalDia.classList.remove('flex');
+      modalDiaLista.innerHTML = '';
+      diaCalendarioSeleccionado = null;
+      renderMiniCalendario();
+    }
+
+    function aplicarScrollAgenda(contenedor, cantidad) {
+      contenedor.classList.remove('agenda-feed-list--scrollable');
+      if (cantidad > 4) {
+        contenedor.classList.add('agenda-feed-list--scrollable');
+      }
+    }
+
+    async function abrirModalDia(fechaIso) {
+      diaCalendarioSeleccionado = fechaIso;
+      renderMiniCalendario();
+      modalDia.classList.remove('hidden');
+      modalDia.classList.add('flex');
+      modalDiaCargando.classList.remove('hidden');
+      modalDiaLista.classList.remove('agenda-feed-list--scrollable');
+      modalDiaLista.innerHTML = '';
+      modalDiaTitulo.textContent = 'Agenda del día';
+      modalDiaSubtitulo.textContent = 'Cargando turnos...';
+
+      try {
+        const params = new URLSearchParams({ fecha: fechaIso, sucursal: String(sucursalId) });
+        const res = await fetch('/dashboard/' + agenciaId + '/citas/dia?' + params.toString());
+        if (!res.ok) throw new Error();
+        const data = await res.json();
+        modalDiaTitulo.textContent = 'Agenda del ' + data.fecha_label;
+        modalDiaSubtitulo.textContent = data.total + (data.total === 1 ? ' turno programado en esta sucursal' : ' turnos programados en esta sucursal');
+        if (!data.citas || !data.citas.length) {
+          modalDiaLista.innerHTML = EMPTY_STATE_HTML;
+        } else {
+          modalDiaLista.innerHTML = '<ul class="divide-y" style="border-color: var(--border);">' + data.citas.map(renderCitaItemModal).join('') + '</ul>';
+        }
+      } catch (_) {
+        modalDiaLista.innerHTML = '<p class="py-6 text-center text-sm text-red-400">No se pudieron cargar las citas de este día.</p>';
+        modalDiaSubtitulo.textContent = '';
+      } finally {
+        modalDiaCargando.classList.add('hidden');
+      }
+    }
+
+    function hexToRgba(hex, alpha) {
+      const raw = (hex || '#3B82F6').trim();
+      if (raw.charAt(0) !== '#') return raw;
+      const h = raw.replace('#', '');
+      const full = h.length === 3 ? h.split('').map(function (c) { return c + c; }).join('') : h;
+      const r = parseInt(full.slice(0, 2), 16);
+      const g = parseInt(full.slice(2, 4), 16);
+      const b = parseInt(full.slice(4, 6), 16);
+      return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
+    }
+
+    function datosGrafico(vista) {
+      const src = vista === 'mensual' ? analitica.mensual : analitica.semanal;
+      return {
+        labels: src.labels || [],
+        datasets: src.datasets || [],
+      };
+    }
+
+    function renderLeyenda(datasets) {
+      const cont = document.getElementById('grafico-leyenda');
+      if (!cont) return;
+      if (!datasets.length) { cont.innerHTML = ''; return; }
+      cont.innerHTML = datasets.map(function (d) {
+        return '<span class="inline-flex items-center gap-1.5">' +
+          '<span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:' + (d.color || '#3B82F6') + ';"></span>' +
+          escHtml(d.label) + '</span>';
+      }).join('');
+    }
+
+    function ajustarAnchoGrafico() {
+      // El gráfico siempre se adapta al ancho disponible del contenedor.
+      // Sin min-width ni scroll horizontal: evita barras "fantasma".
+      const wrap = document.getElementById('grafico-wrap');
+      const contenedor = document.getElementById('grafico-scroll');
+      if (wrap) {
+        wrap.style.minWidth = '';
+        wrap.style.width = '100%';
+      }
+      if (contenedor) {
+        contenedor.classList.remove('overflow-x-auto');
+        contenedor.classList.add('overflow-hidden');
+      }
+    }
+
+    function construirDatasetsChart(datasets) {
+      return datasets.map(function (d) {
+        return {
+          label: d.label,
+          data: d.data,
+          backgroundColor: hexToRgba(d.color, 0.85),
+          borderColor: hexToRgba(d.color, 1),
+          borderWidth: 1,
+          borderRadius: 5,
+          maxBarThickness: 34,
+          categoryPercentage: 0.78,
+          barPercentage: 0.9,
+        };
+      });
+    }
+
+    function actualizarGrafico(vista) {
+      vistaGrafico = vista;
+      document.querySelectorAll('[data-vista-grafico]').forEach(function (btn) {
+        btn.classList.toggle('active', btn.dataset.vistaGrafico === vista);
+      });
+
+      const canvas = document.getElementById('grafico-citas');
+      if (!canvas || typeof Chart === 'undefined') return;
+
+      const datos = datosGrafico(vista);
+      const chartDatasets = construirDatasetsChart(datos.datasets);
+      renderLeyenda(datos.datasets);
+      ajustarAnchoGrafico(datos.labels.length, datos.datasets.length);
+
+      if (chartCitas) {
+        chartCitas.data.labels = datos.labels;
+        chartCitas.data.datasets = chartDatasets;
+        chartCitas.update();
+        return;
+      }
+
+      chartCitas = new Chart(canvas, {
+        type: 'bar',
+        data: {
+          labels: datos.labels,
+          datasets: chartDatasets,
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor: 'rgba(15, 23, 42, 0.95)',
+              borderColor: brandColor(0.6),
+              borderWidth: 1,
+              titleColor: '#f8fafc',
+              bodyColor: '#cbd5e1',
+              padding: 10,
+            },
+          },
+          scales: {
+            x: {
+              grid: { color: 'rgba(148, 163, 184, 0.08)' },
+              ticks: { color: '#94a3b8', font: { size: 11 } },
+            },
+            y: {
+              beginAtZero: true,
+              grid: { color: 'rgba(148, 163, 184, 0.12)' },
+              ticks: {
+                color: '#94a3b8',
+                precision: 0,
+                font: { size: 11 },
+              },
+            },
+          },
+        },
+      });
+    }
+
+    document.querySelectorAll('[data-vista-grafico]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        if (btn.dataset.vistaGrafico === vistaGrafico) return;
+        actualizarGrafico(btn.dataset.vistaGrafico);
+      });
+    });
+
+    renderMiniCalendario();
+    actualizarGrafico('semanal');
+
+    let resizeTimer = null;
+    window.addEventListener('resize', function () {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(function () {
+        const datos = datosGrafico(vistaGrafico);
+        ajustarAnchoGrafico(datos.labels.length, datos.datasets.length);
+        if (chartCitas) chartCitas.resize();
+      }, 150);
+    });
+
+    document.getElementById('mini-calendario').addEventListener('click', function (e) {
+      const btn = e.target.closest('[data-fecha]');
+      if (!btn) return;
+      abrirModalDia(btn.dataset.fecha);
+    });
+
+    async function cargarMesCalendario(anio, mes) {
+      if (calCargando) return;
+      calCargando = true;
+      try {
+        const params = new URLSearchParams({ anio: String(anio), mes: String(mes), sucursal: String(sucursalId) });
+        const res = await fetch('/dashboard/' + agenciaId + '/citas/calendario?' + params.toString());
+        if (!res.ok) throw new Error();
+        calData = await res.json();
+        renderMiniCalendario();
+      } catch (_) {
+        /* mantiene el mes actual si falla */
+      } finally {
+        calCargando = false;
+      }
+    }
+
+    function navegarMes(delta) {
+      let anio = calData.anio;
+      let mes = calData.mes + delta;
+      if (mes < 1) { mes = 12; anio -= 1; }
+      else if (mes > 12) { mes = 1; anio += 1; }
+      cargarMesCalendario(anio, mes);
+    }
+
+    const calPrev = document.getElementById('cal-prev');
+    const calNext = document.getElementById('cal-next');
+    const calMesSelect = document.getElementById('cal-mes-select');
+    const calAnioInput = document.getElementById('cal-anio-input');
+    if (calPrev) calPrev.addEventListener('click', function () { navegarMes(-1); });
+    if (calNext) calNext.addEventListener('click', function () { navegarMes(1); });
+    function aplicarSeleccionMesAnio() {
+      const mes = parseInt(calMesSelect.value, 10);
+      const anio = parseInt(calAnioInput.value, 10);
+      if (!mes || !anio || anio < 2000 || anio > 2100) return;
+      cargarMesCalendario(anio, mes);
+    }
+    if (calMesSelect && calAnioInput) {
+      calMesSelect.value = String(calData.mes);
+      calAnioInput.value = String(calData.anio);
+      calMesSelect.addEventListener('change', aplicarSeleccionMesAnio);
+      calAnioInput.addEventListener('change', aplicarSeleccionMesAnio);
+    }
+
+    btnModalDiaCerrar.addEventListener('click', cerrarModalDia);
+    modalDia.addEventListener('click', function (e) { if (e.target === modalDia) cerrarModalDia(); });
 
     function estaSilenciado() {
       return localStorage.getItem(STORAGE_SILENCIO) === '1';
@@ -154,6 +786,14 @@
       '</div>'
     );
 
+    function vendedorChip(nombre) {
+      return (
+        '<p class="mt-1"><span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium" ' +
+        'style="background: color-mix(in srgb, var(--brand) 16%, transparent); color: var(--title); border: 1px solid color-mix(in srgb, var(--brand) 30%, transparent);">' +
+        '<span style="opacity:0.7;">Vendedor:</span> ' + escHtml(nombre) + '</span></p>'
+      );
+    }
+
     function renderCitaItem(cita, esHoy) {
       const horaClass = esHoy
         ? 'rounded-lg px-2.5 py-1 text-sm font-semibold text-brand'
@@ -163,26 +803,32 @@
         : 'background: color-mix(in srgb, var(--card) 80%, var(--surface)); color: var(--title);';
       const recordatorio = cita.recordatorio_enviado
         ? '<p class="mt-1 text-xs" style="color:#6ee7b7;">Recordatorio enviado</p>' : '';
+      const vendedor = cita.vendedor ? vendedorChip(cita.vendedor) : '';
 
       return (
-        '<li><button type="button" class="cita-item group w-full rounded-lg px-2 py-4 text-left transition hover:opacity-90" data-cita-id="' + cita.id + '" style="border-bottom:1px solid var(--border);">' +
+        '<li><button type="button" class="cita-item group w-full rounded-lg py-4 pl-3 pr-2 text-left transition hover:opacity-90" data-cita-id="' + cita.id + '" style="border-bottom:1px solid var(--border); border-left:4px solid var(--brand);">' +
         '<div class="flex items-start justify-between gap-3">' +
         '<div><p class="font-medium group-hover:text-brand transition" style="color:var(--title);">' + escHtml(cita.cliente) + '</p>' +
         '<p class="mt-1 text-sm" style="color:var(--muted);">' + escHtml(cita.auto) + '</p>' +
-        '<p class="mt-1 text-xs" style="color:var(--muted);">Tel: ' + escHtml(cita.telefono) + '</p>' +
+        '<p class="mt-1 flex items-center gap-2 text-xs" style="color:var(--muted);">' +
+        '<span>Tel: ' + escHtml(cita.telefono) + '</span>' + btnWaMeHtml(cita.telefono, { sm: true, stopPropagation: true }) +
+        '</p>' +
+        vendedor +
         '<p class="mt-2 text-xs text-brand opacity-0 group-hover:opacity-100 transition">Ver conversación →</p></div>' +
         '<div class="text-right"><span class="' + horaClass + '" style="' + horaStyle + '">' + escHtml(cita.hora) + '</span>' +
-        '<p class="mt-1 text-xs capitalize" style="color:var(--muted);">' + escHtml(cita.estado) + '</p>' + recordatorio + '</div></div></button></li>'
+        '<p class="mt-1 text-xs estado-badge cita-estado-label estado-' + escHtml(cita.estado || 'pendiente') + '">' + escHtml(cita.estado_label || cita.estado || '—') + '</p>' + recordatorio + '</div></div></button></li>'
       );
     }
 
     function renderLista(contenedor, citas, esHoy) {
       if (!citas.length) {
+        contenedor.classList.remove('agenda-feed-list--scrollable');
         contenedor.innerHTML = EMPTY_STATE_HTML;
         return;
       }
       contenedor.innerHTML = '<ul>' +
         citas.map(function (c) { return renderCitaItem(c, esHoy); }).join('') + '</ul>';
+      aplicarScrollAgenda(contenedor, citas.length);
     }
 
     function aplicarFeed(feed, notificarNuevas) {
@@ -192,8 +838,6 @@
       renderLista(listaManana, feed.citas_manana, false);
 
       const todas = feed.citas_hoy.concat(feed.citas_manana);
-      const mapa = {};
-      todas.forEach(function (c) { mapa[c.id] = c; });
 
       if (!feedInicializado) {
         todas.forEach(function (c) { citasConocidas.add(c.id); });
@@ -221,20 +865,26 @@
       citasConocidas = new Set(todas.map(function (c) { return c.id; }));
     }
 
-    async function pollFeed() {
+    async function pollFeed(notificarNuevas) {
       try {
-        const res = await fetch('/dashboard/' + agenciaId + '/citas/feed');
+        const params = new URLSearchParams({ sucursal: String(sucursalId) });
+        const res = await fetch('/dashboard/' + agenciaId + '/citas/feed?' + params.toString());
         if (!res.ok) return;
         const feed = await res.json();
-        aplicarFeed(feed, true);
+        aplicarFeed(feed, notificarNuevas !== false);
       } catch (_) {}
     }
+    window.refrescarFeedCitas = function () { return pollFeed(false); };
 
     function cerrarModal() {
       modal.classList.add('hidden');
       modal.classList.remove('flex');
       chat.innerHTML = '';
       resumen.innerHTML = '';
+      citaActivaId = null;
+      setEstadoLoading(false);
+      showEstadoMsg('', '');
+      actualizarModalWa(null);
     }
 
     function renderMensaje(msg) {
@@ -242,7 +892,7 @@
       const wrap = document.createElement('div');
       wrap.className = 'flex ' + (esCliente ? 'justify-start' : 'justify-end');
       const burbuja = document.createElement('div');
-      burbuja.className = 'max-w-[85%] rounded-2xl px-4 py-2.5 text-sm ' + (
+      burbuja.className = 'max-w-[72%] rounded-2xl px-4 py-2.5 text-sm ' + (
         esCliente ? 'rounded-bl-md bg-slate-800 text-slate-100' : 'rounded-br-md bg-brand/25 text-white ring-1 ring-brand/30'
       );
       const texto = document.createElement('p');
@@ -259,26 +909,89 @@
       return wrap;
     }
 
+    function renderResumenHistorial(contenedor, items) {
+      contenedor.innerHTML = '';
+      if (!items || !items.length) return;
+      items.forEach(function (item) {
+        const li = document.createElement('li');
+        li.className = 'rounded-full px-2.5 py-1 leading-snug';
+        li.style.background = 'rgba(255,255,255,0.14)';
+        li.style.color = '#fff';
+        li.style.border = '1px solid rgba(255,255,255,0.22)';
+        li.textContent = item;
+        contenedor.appendChild(li);
+      });
+    }
+
+    function estadoLabel(clave) {
+      return ESTADOS_LABELS[clave] || clave || '—';
+    }
+
+    function htmlEstadoBadge(clave, etiqueta) {
+      const key = clave || 'pendiente';
+      return '<span class="estado-badge estado-' + escHtml(key) + '">' + escHtml(etiqueta || estadoLabel(key)) + '</span>';
+    }
+
+    function actualizarEstadoEnUI(citaId, clave, etiqueta) {
+      const id = String(citaId);
+      const label = etiqueta || estadoLabel(clave);
+      document.querySelectorAll('[data-cita-id="' + id + '"]').forEach(function (el) {
+        const feedLbl = el.querySelector('.cita-estado-label');
+        if (feedLbl) {
+          feedLbl.className = 'mt-1 text-xs estado-badge cita-estado-label estado-' + clave;
+          feedLbl.textContent = label;
+        }
+        const badge = el.querySelector('.estado-badge:not(.cita-estado-label)');
+        if (badge) {
+          badge.className = 'estado-badge estado-' + clave;
+          badge.textContent = label;
+        }
+      });
+      const fila = document.querySelector('tr[data-cita-id="' + id + '"]');
+      if (fila) {
+        const celda = fila.querySelector('.cita-estado-celda');
+        if (celda) celda.innerHTML = htmlEstadoBadge(clave, label);
+      }
+    }
+
+    function setEstadoLoading(activo) {
+      estadoGuardando = activo;
+      if (estadoWrap) estadoWrap.classList.toggle('is-saving', activo);
+      if (estadoSpinner) estadoSpinner.classList.toggle('hidden', !activo);
+      if (estadoSelect) {
+        estadoSelect.disabled = activo;
+        estadoSelect.setAttribute('aria-busy', activo ? 'true' : 'false');
+      }
+    }
+
+    function showEstadoMsg(texto, tipo) {
+      if (!estadoMsg) return;
+      estadoMsg.textContent = texto || '';
+      estadoMsg.style.color = tipo === 'error'
+        ? '#fca5a5'
+        : (tipo === 'ok' ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.8)');
+    }
+
     async function abrirHistorial(citaId) {
       modal.classList.remove('hidden');
       modal.classList.add('flex');
       cargando.classList.remove('hidden');
       chat.innerHTML = '';
       resumen.innerHTML = '';
+      citaActivaId = citaId;
+      if (estadoMsg) estadoMsg.textContent = '';
       try {
         const res = await fetch('/dashboard/' + agenciaId + '/citas/' + citaId + '/historial');
         if (!res.ok) throw new Error();
         const data = await res.json();
         titulo.textContent = data.cliente;
-        subtitulo.textContent = data.fecha_cita + ' ' + data.hora_cita + ' hs · ' + (data.auto_interes || 'Sin auto') + ' · ' + data.telefono;
-        if (data.resumen && data.resumen.items) {
-          data.resumen.items.forEach(function (item) {
-            const li = document.createElement('li');
-            li.className = 'rounded-full bg-slate-800 px-2.5 py-1 text-slate-300';
-            li.textContent = item;
-            resumen.appendChild(li);
-          });
+        if (estadoSelect && data.estado) {
+          estadoSelect.value = data.estado;
+          estadoSelect.dataset.valorConfirmado = data.estado;
         }
+        subtitulo.textContent = data.fecha_cita + ' · ' + data.hora_cita + ' hs · Tel. ' + data.telefono;
+        actualizarModalWa(data.telefono);
+        renderResumenHistorial(resumen, data.resumen && data.resumen.items ? data.resumen.items : []);
         if (!data.mensajes || !data.mensajes.length) {
           chat.innerHTML = '<p class="py-8 text-center text-sm text-slate-500">Todavía no hay mensajes guardados para este cliente.</p>';
         } else {
@@ -291,10 +1004,64 @@
       }
     }
 
+    if (estadoSelect) {
+      estadoSelect.addEventListener('change', async function () {
+        if (!citaActivaId || estadoGuardando) return;
+        const nuevo = estadoSelect.value;
+        const anterior = estadoSelect.dataset.valorConfirmado || nuevo;
+        const labelNuevo = estadoLabel(nuevo);
+        const labelAnterior = estadoLabel(anterior);
+
+        // Actualización optimista: el select ya muestra el valor nuevo.
+        actualizarEstadoEnUI(citaActivaId, nuevo, labelNuevo);
+        setEstadoLoading(true);
+        showEstadoMsg('Guardando…', 'pending');
+
+        try {
+          const fd = new FormData();
+          fd.append('estado', nuevo);
+          const res = await fetch('/dashboard/' + agenciaId + '/citas/' + citaActivaId + '/estado', {
+            method: 'POST',
+            body: fd,
+          });
+          const data = await res.json().catch(function () { return {}; });
+          if (!res.ok) throw new Error(data.error || 'fallo');
+
+          const confirmado = data.estado || nuevo;
+          const labelConfirmado = data.estado_label || estadoLabel(confirmado);
+          estadoSelect.value = confirmado;
+          estadoSelect.dataset.valorConfirmado = confirmado;
+          actualizarEstadoEnUI(citaActivaId, confirmado, labelConfirmado);
+          showEstadoMsg('Estado actualizado ✓', 'ok');
+
+          // Sincronizar feed y estadísticas en paralelo, sin bloquear el selector.
+          const syncs = [];
+          syncs.push(window.refrescarFeedCitas ? window.refrescarFeedCitas() : Promise.resolve());
+          if (typeof window.cargarEstadisticas === 'function') {
+            syncs.push(window.cargarEstadisticas(true));
+          }
+          Promise.all(syncs).catch(function () {});
+        } catch (_) {
+          estadoSelect.value = anterior;
+          estadoSelect.dataset.valorConfirmado = anterior;
+          actualizarEstadoEnUI(citaActivaId, anterior, labelAnterior);
+          showEstadoMsg('Error al guardar', 'error');
+        } finally {
+          setEstadoLoading(false);
+          setTimeout(function () { showEstadoMsg('', ''); }, 2200);
+        }
+      });
+    }
+
     document.addEventListener('click', function (e) {
       const btn = e.target.closest('.cita-item');
       if (btn && btn.dataset.citaId) {
         abrirHistorial(btn.dataset.citaId);
+        return;
+      }
+      const fila = e.target.closest('tr[data-cita-id]');
+      if (fila && fila.dataset.citaId) {
+        abrirHistorial(fila.dataset.citaId);
       }
     });
 
@@ -327,7 +1094,11 @@
 
     btnCerrar.addEventListener('click', cerrarModal);
     modal.addEventListener('click', function (e) { if (e.target === modal) cerrarModal(); });
-    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') cerrarModal(); });
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== 'Escape') return;
+      if (!modal.classList.contains('hidden')) cerrarModal();
+      else if (!modalDia.classList.contains('hidden')) cerrarModalDia();
+    });
 
     actualizarBotonSilencio();
     aplicarFeed(feedInicial, false);
@@ -335,6 +1106,324 @@
     document.addEventListener('visibilitychange', function () {
       if (!document.hidden) pollFeed();
     });
+  })();
+
+  (function () {
+    const agenciaId = {{ agencia.id }};
+    const form = document.getElementById('form-buscar-citas');
+    const estado = document.getElementById('buscar-estado');
+    const contenedor = document.getElementById('buscar-resultados');
+    const cuerpo = document.getElementById('buscar-resultados-body');
+    const vacio = document.getElementById('buscar-vacio');
+    const btnLimpiar = document.getElementById('btn-limpiar-busqueda');
+    const selSucursal = document.getElementById('buscar-sucursal');
+    const selVendedor = document.getElementById('buscar-vendedor');
+    const VENDEDORES_POR_SUCURSAL = {{ vendedores_por_sucursal|tojson }};
+
+    function poblarVendedores(sucursalId, seleccionado) {
+      selVendedor.innerHTML = '<option value="">Todos los vendedores</option>';
+      const lista = (sucursalId && VENDEDORES_POR_SUCURSAL[sucursalId]) || [];
+      if (!sucursalId || !lista.length) {
+        // En "Todas las sucursales" el filtro de vendedor se deshabilita y limpia.
+        selVendedor.disabled = true;
+        selVendedor.value = '';
+        return;
+      }
+      lista.forEach(function (v) {
+        const opt = document.createElement('option');
+        opt.value = String(v.id);
+        opt.textContent = v.nombre;
+        selVendedor.appendChild(opt);
+      });
+      selVendedor.disabled = false;
+      if (seleccionado) selVendedor.value = String(seleccionado);
+    }
+
+    if (selSucursal && selVendedor) {
+      selSucursal.addEventListener('change', function () {
+        poblarVendedores(this.value, null);
+      });
+      poblarVendedores(selSucursal.value, null);
+    }
+
+    function escHtml(texto) {
+      const d = document.createElement('div');
+      d.textContent = texto == null ? '' : String(texto);
+      return d.innerHTML;
+    }
+
+    function ocultarResultados() {
+      contenedor.classList.add('hidden');
+      vacio.classList.add('hidden');
+      estado.classList.add('hidden');
+      cuerpo.innerHTML = '';
+    }
+
+    function renderFila(cita) {
+      const tr = document.createElement('tr');
+      tr.dataset.citaId = cita.id;
+      tr.className = 'cursor-pointer transition hover:opacity-90';
+      tr.title = 'Ver conversación del bot';
+      tr.style.borderTop = '1px solid var(--border)';
+      tr.innerHTML =
+        '<td class="px-3 py-3 font-medium" style="color:var(--title);">' + escHtml(cita.cliente) + '</td>' +
+        '<td class="px-3 py-3 tabular-nums" style="color:var(--muted);">' + escHtml(cita.telefono) + '</td>' +
+        '<td class="px-3 py-3 tabular-nums" style="color:var(--title);">' + escHtml(cita.fecha) + '</td>' +
+        '<td class="px-3 py-3 tabular-nums" style="color:var(--title);">' + escHtml(cita.hora) + ' hs</td>' +
+        '<td class="px-3 py-3" style="color:var(--muted);">' + escHtml(cita.auto) + '</td>' +
+        '<td class="px-3 py-3" style="color:var(--title);">' + escHtml(cita.sucursal) + '</td>' +
+        '<td class="px-3 py-3" style="color:var(--muted);">' + escHtml(cita.vendedor || '—') + '</td>' +
+        '<td class="px-3 py-3 cita-estado-celda"><span class="estado-badge estado-' + escHtml(cita.estado || 'pendiente') + '">' + escHtml(cita.estado_label || cita.estado || '—') + '</span></td>' +
+        '<td class="px-3 py-3 text-center">' + (window.btnWaMeHtml ? window.btnWaMeHtml(cita.telefono, { sm: true, stopPropagation: true }) : '') + '</td>';
+      return tr;
+    }
+
+    async function buscar(event) {
+      event.preventDefault();
+      const telefono = document.getElementById('buscar-telefono').value.trim();
+      const nombre = document.getElementById('buscar-nombre').value.trim();
+      const apellido = document.getElementById('buscar-apellido').value.trim();
+      const fecha = document.getElementById('buscar-fecha').value;
+      const sucursal = document.getElementById('buscar-sucursal').value;
+      const vendedor = selVendedor && !selVendedor.disabled ? selVendedor.value : '';
+
+      if (!telefono && !nombre && !apellido && !fecha && !sucursal && !vendedor) {
+        estado.textContent = 'Completá al menos un filtro para buscar.';
+        estado.classList.remove('hidden');
+        contenedor.classList.add('hidden');
+        vacio.classList.add('hidden');
+        return;
+      }
+
+      estado.textContent = 'Buscando...';
+      estado.classList.remove('hidden');
+      contenedor.classList.add('hidden');
+      vacio.classList.add('hidden');
+
+      const params = new URLSearchParams();
+      if (telefono) params.set('telefono', telefono);
+      if (nombre) params.set('nombre', nombre);
+      if (apellido) params.set('apellido', apellido);
+      if (fecha) params.set('fecha', fecha);
+      if (sucursal) params.set('sucursal', sucursal);
+      if (vendedor) params.set('vendedor', vendedor);
+
+      try {
+        const res = await fetch('/dashboard/' + agenciaId + '/citas/buscar?' + params.toString());
+        if (!res.ok) throw new Error();
+        const data = await res.json();
+        cuerpo.innerHTML = '';
+
+        if (!data.citas || !data.citas.length) {
+          estado.classList.add('hidden');
+          vacio.classList.remove('hidden');
+          return;
+        }
+
+        data.citas.forEach(function (cita) {
+          cuerpo.appendChild(renderFila(cita));
+        });
+        estado.textContent = data.total + ' cita(s) encontrada(s).';
+        contenedor.classList.remove('hidden');
+      } catch (_) {
+        estado.textContent = 'No se pudo completar la búsqueda. Intentá de nuevo.';
+      }
+    }
+
+    form.addEventListener('submit', buscar);
+    btnLimpiar.addEventListener('click', function () {
+      form.reset();
+      if (selSucursal && selVendedor) poblarVendedores(selSucursal.value, null);
+      ocultarResultados();
+    });
+  })();
+
+  (function () {
+    const selectorSucursal = document.getElementById('selector-sucursal-citas');
+    if (selectorSucursal) {
+      selectorSucursal.addEventListener('change', function () {
+        window.location.href = '/dashboard/{{ agencia.id }}/citas?sucursal=' + encodeURIComponent(this.value);
+      });
+    }
+  })();
+
+  (function () {
+    const agenciaId = {{ agencia.id }};
+    const datosIniciales = {{ estadisticas_inicial | tojson }};
+    const cont = document.getElementById('est-ranking');
+    if (!cont) return;
+    const podioBox = document.getElementById('est-podio');
+    const totalesBox = document.getElementById('est-totales');
+    const rangoLbl = document.getElementById('est-rango');
+    const selSuc = document.getElementById('est-sucursal');
+    const tabs = Array.from(document.querySelectorAll('.periodo-tab'));
+    let periodo = 'semanal';
+
+    function esc(s) {
+      return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+      });
+    }
+
+    function tarjeta(label, valor, color) {
+      return '<div class="rounded-lg p-3" style="border:1px solid var(--border); background: color-mix(in srgb, var(--brand) 5%, transparent);">' +
+        '<p class="text-xs" style="color: var(--muted);">' + esc(label) + '</p>' +
+        '<p class="mt-0.5 text-xl font-bold tabular-nums" style="color:' + (color || 'var(--title)') + ';">' + esc(valor) + '</p>' +
+        '</div>';
+    }
+
+    function renderRankingRow(f, i, maxVol) {
+      const pct = maxVol ? Math.round(f.total / maxVol * 100) : 0;
+      const posClass = f.es_lider ? ' rank-pos-1' : '';
+      const rowClass = 'rank-row' + (f.es_lider ? ' rank-row--lider' : '');
+      const principalTag = f.es_principal
+        ? ' <span class="ml-1 rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase" style="background: color-mix(in srgb, var(--brand) 18%, transparent); color: var(--muted);">Principal</span>'
+        : '';
+      const sinAsignarTag = f.vendedor_id == null
+        ? ' <span class="ml-1 rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase" style="background: rgba(148,163,184,0.16); color: var(--muted);">Legacy</span>'
+        : '';
+      const trophy = f.es_lider
+        ? '<span class="rank-trophy" title="Mayor conversión del período">🏆 Top</span>'
+        : '';
+      const waBtn = (window.btnWaMeHtml && f.telefono_wa_me)
+        ? window.btnWaMeHtml(f.telefono_wa_me, { sm: true })
+        : '';
+      return (
+        '<div class="' + rowClass + '">' +
+          '<span class="rank-pos' + posClass + '">' + (f.total > 0 ? (i + 1) : '—') + '</span>' +
+          '<div class="min-w-0">' +
+            '<div class="flex items-center justify-between gap-2">' +
+              '<span class="truncate text-sm font-semibold" style="color: var(--title);">' + esc(f.vendedor) + principalTag + sinAsignarTag + trophy + '</span>' +
+              '<span class="flex shrink-0 items-center gap-1.5">' + waBtn +
+              '<span class="text-xs" style="color: var(--muted);">' + esc(f.sucursal) + '</span></span>' +
+            '</div>' +
+            '<div class="rank-bar-track"><div class="rank-bar-fill" style="width:' + pct + '%;"></div></div>' +
+            '<div class="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs" style="color: var(--muted);">' +
+              '<span>' + f.total + ' gestionadas</span>' +
+              '<span style="color:#6ee7b7;">' + f.concretadas + ' concretadas</span>' +
+              '<span style="color:#fca5a5;">' + f.perdidas + ' perdidas</span>' +
+              '<span>' + f.en_proceso + ' en proceso</span>' +
+            '</div>' +
+          '</div>' +
+          '<div class="text-right shrink-0">' +
+            '<p class="text-lg font-bold tabular-nums" style="color: var(--brand);">' + (f.tasa_conversion || 0) + '%</p>' +
+            '<p class="text-[10px] uppercase tracking-wide" style="color: var(--muted);">conversión</p>' +
+          '</div>' +
+        '</div>'
+      );
+    }
+
+    function renderPodio(filas) {
+      if (!podioBox) return;
+      const top = filas.filter(function (f) {
+        return f.total > 0 && f.vendedor_id != null;
+      }).slice(0, 3);
+      if (!top.length) {
+        podioBox.classList.add('hidden');
+        podioBox.innerHTML = '';
+        return;
+      }
+      const slots = top.length >= 3 ? [top[1], top[0], top[2]] : (top.length === 2 ? [top[1], top[0]] : [top[0]]);
+      const slotClass = top.length >= 3
+        ? ['podium-slot--second', 'podium-slot--first', 'podium-slot--third']
+        : (top.length === 2 ? ['podium-slot--second', 'podium-slot--first'] : ['podium-slot--first']);
+      const medals = top.length >= 3 ? ['2', '1', '3'] : (top.length === 2 ? ['2', '1'] : ['1']);
+      podioBox.innerHTML = '<div class="rank-podium">' + slots.map(function (f, idx) {
+        const medalNum = medals[idx];
+        const cls = slotClass[idx];
+        const trophyLbl = f.es_lider ? ' 🏆' : '';
+        return (
+          '<div class="podium-slot ' + cls + '">' +
+            '<span class="podium-medal podium-medal--' + medalNum + '">' + medalNum + '</span>' +
+            '<p class="truncate text-sm font-semibold" style="color: var(--title);">' + esc(f.vendedor) + trophyLbl + '</p>' +
+            '<p class="mt-1 text-xl font-bold tabular-nums" style="color: var(--brand);">' + (f.tasa_conversion || 0) + '%</p>' +
+            '<p class="text-[10px] uppercase tracking-wide" style="color: var(--muted);">conversión</p>' +
+            '<p class="mt-1 text-xs" style="color: var(--muted);">' + f.concretadas + '/' + f.total + ' ventas</p>' +
+          '</div>'
+        );
+      }).join('') + '</div>';
+      podioBox.classList.remove('hidden');
+    }
+
+    function ordenarRanking(filas) {
+      const sinAsignar = filas.filter(function (f) { return f.vendedor_id == null; });
+      const rest = filas.filter(function (f) { return f.vendedor_id != null; });
+      rest.sort(function (a, b) {
+        return (b.tasa_conversion - a.tasa_conversion)
+          || (b.concretadas - a.concretadas)
+          || (b.total - a.total);
+      });
+      return rest.concat(sinAsignar);
+    }
+
+    function render(data) {
+      rangoLbl.textContent = data.periodo_label + ' (' + data.rango.desde + ' – ' + data.rango.hasta + ')';
+      const t = data.totales || {};
+      totalesBox.innerHTML =
+        tarjeta('Citas gestionadas', t.total || 0) +
+        tarjeta('Ventas concretadas', t.concretadas || 0, '#6ee7b7') +
+        tarjeta('Ventas perdidas', t.perdidas || 0, '#fca5a5') +
+        tarjeta('Conversión global', (t.tasa_conversion || 0) + '%', 'var(--brand)');
+
+      const filas = data.vendedores || [];
+      const ranking = ordenarRanking(filas.filter(function (f) {
+        return f.total > 0 || f.es_principal || f.vendedor_id == null;
+      }));
+
+      renderPodio(ranking);
+
+      if (!ranking.length) {
+        cont.innerHTML = '<p class="py-6 text-center text-sm" style="color: var(--muted);">No hay vendedores configurados. Creá el Vendedor Principal en Configuración.</p>';
+        return;
+      }
+
+      const conActividad = ranking.filter(function (f) { return f.total > 0; });
+      const maxVol = Math.max.apply(null, conActividad.map(function (f) { return f.total; }).concat([1]));
+      cont.innerHTML = ranking.map(function (f, i) {
+        return renderRankingRow(f, i, maxVol);
+      }).join('');
+    }
+
+    async function cargarEstadisticas(silencioso) {
+      const suc = selSuc ? selSuc.value : '';
+      const params = new URLSearchParams({ periodo: periodo });
+      if (suc) params.append('sucursal', suc);
+      if (!silencioso) {
+        cont.innerHTML = '<p class="py-8 text-center text-sm" style="color: var(--muted);">Calculando métricas…</p>';
+      } else {
+        cont.classList.add('is-syncing');
+        if (totalesBox) totalesBox.classList.add('is-syncing');
+      }
+      try {
+        const res = await fetch('/dashboard/' + agenciaId + '/citas/estadisticas?' + params.toString());
+        if (!res.ok) throw new Error();
+        render(await res.json());
+      } catch (_) {
+        if (!silencioso) {
+          cont.innerHTML = '<p class="py-8 text-center text-sm text-red-400">Error al cargar estadísticas.</p>';
+        }
+      } finally {
+        cont.classList.remove('is-syncing');
+        if (totalesBox) totalesBox.classList.remove('is-syncing');
+      }
+    }
+    window.cargarEstadisticas = cargarEstadisticas;
+
+    tabs.forEach(function (tab) {
+      tab.addEventListener('click', function () {
+        tabs.forEach(function (t) { t.classList.remove('activo'); });
+        tab.classList.add('activo');
+        periodo = tab.dataset.periodo;
+        cargarEstadisticas();
+      });
+    });
+    if (selSuc) selSuc.addEventListener('change', cargarEstadisticas);
+
+    if (datosIniciales) {
+      render(datosIniciales);
+    } else {
+      cargarEstadisticas();
+    }
   })();
 </script>
 {% endblock %}

@@ -2,29 +2,39 @@
 {% from "dashboard/macros.html" import empty_state %}
 {% block title %}Leads — {{ agencia.nombre }}{% endblock %}
 {% block content %}
-<div class="page-header">
-  <a href="/dashboard/{{ agencia.id }}" class="text-sm hover:opacity-90" style="color: var(--muted);">← Volver al inicio</a>
-  <h1 class="page-title mt-2">Leads</h1>
-  <p class="page-subtitle">{{ total_leads }} prospectos registrados</p>
+<div class="page-header flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+  <div>
+    <a href="/dashboard/{{ agencia.id }}?sucursal={{ sucursal_activa.id }}" class="text-sm hover:opacity-90" style="color: var(--muted);">← Volver al inicio</a>
+    <h1 class="page-title mt-2">Leads</h1>
+    <p class="page-subtitle">{{ sucursal_activa.nombre }} · {{ total_leads }} prospecto{% if total_leads != 1 %}s{% endif %} registrado{% if total_leads != 1 %}s{% endif %}</p>
+  </div>
+  <label class="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">
+    <span class="text-xs font-medium uppercase tracking-wide" style="color: var(--muted);">Sucursal</span>
+    <select id="selector-sucursal-leads" class="ui-select min-w-[11rem]">
+      {% for suc in sucursales %}
+      <option value="{{ suc.id }}" {% if suc.id == sucursal_activa.id %}selected{% endif %}>{{ suc.nombre }}</option>
+      {% endfor %}
+    </select>
+  </label>
 </div>
 
 {% if leads %}
 <div class="ui-card overflow-hidden p-1 sm:p-2">
   <div class="overflow-x-auto">
     <table class="w-full border-separate text-sm" style="border-spacing: 0 0.5rem;">
-      <thead>
+      <thead class="table-head-brand">
         <tr>
-          <th class="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider" style="color: var(--muted);">Cliente</th>
-          <th class="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider" style="color: var(--muted);">Teléfono</th>
-          <th class="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider" style="color: var(--muted);">Estado</th>
-          <th class="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wider" style="color: var(--muted);">Fecha</th>
+          <th class="px-5 py-2.5 text-left">Cliente</th>
+          <th class="px-5 py-2.5 text-left">Teléfono</th>
+          <th class="px-5 py-2.5 text-left">Estado</th>
+          <th class="px-5 py-2.5 text-right">Fecha</th>
         </tr>
       </thead>
       <tbody>
         {% for lead in leads %}
         <tr>
           <td colspan="4" class="p-0">
-            <div class="ui-card grid grid-cols-1 gap-2 px-5 py-4 sm:grid-cols-4 sm:items-center sm:gap-4" style="background: color-mix(in srgb, var(--card) 96%, var(--surface));">
+            <div class="data-row-card ui-card grid grid-cols-1 gap-2 px-5 py-4 sm:grid-cols-4 sm:items-center sm:gap-4" style="background: color-mix(in srgb, var(--card) 96%, var(--surface));">
               <p class="text-[15px] font-semibold" style="color: var(--title);">
                 {% if lead.nombre_cliente or lead.apellido_cliente %}
                 {{ lead.nombre_cliente or '' }} {{ lead.apellido_cliente or '' }}
@@ -45,7 +55,18 @@
 </div>
 {% else %}
 <div class="ui-card">
-  {{ empty_state('No hay leads registrados', 'Cuando un cliente contacte al bot por WhatsApp, sus datos aparecerán acá.', 'users') }}
+  {{ empty_state('No hay leads en esta sucursal', 'Cuando un cliente contacte al bot por WhatsApp de ' ~ sucursal_activa.nombre ~ ', sus datos aparecerán acá.', 'users') }}
 </div>
 {% endif %}
+
+<script>
+  (function () {
+    const selectorSucursal = document.getElementById('selector-sucursal-leads');
+    if (selectorSucursal) {
+      selectorSucursal.addEventListener('change', function () {
+        window.location.href = '/dashboard/{{ agencia.id }}/leads?sucursal=' + encodeURIComponent(this.value);
+      });
+    }
+  })();
+</script>
 {% endblock %}

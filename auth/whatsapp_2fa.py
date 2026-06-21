@@ -1,16 +1,10 @@
-import os
-
-from dotenv import load_dotenv
-
 from whatsapp import enviar_mensaje_texto_whatsapp
-
-load_dotenv()
+from whatsapp_config import whatsapp_phone_number_id
 
 
 def _phone_number_id_plataforma() -> str:
     return (
-        os.getenv("AUTH_WHATSAPP_PHONE_NUMBER_ID", "").strip()
-        or os.getenv("WHATSAPP_PHONE_NUMBER_ID", "").strip()
+        whatsapp_phone_number_id()
         or "109283746561234"
     )
 

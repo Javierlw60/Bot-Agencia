@@ -4,31 +4,37 @@
   ('inventario', '/dashboard/' ~ agencia.id ~ '/inventario', 'Inventario', 'M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4'),
   ('leads', '/dashboard/' ~ agencia.id ~ '/leads', 'Leads', 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z'),
   ('citas', '/dashboard/' ~ agencia.id ~ '/citas', 'Citas', 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z'),
-  ('marca', '/dashboard/' ~ agencia.id ~ '/marca', 'Marca y diseño', 'M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01'),
+  ('configuracion', '/dashboard/' ~ agencia.id ~ '/configuracion', 'Configuración', 'M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374-.313.686-.686.626a6.014 6.014 0 00-1.025-.076 6.006 6.006 0 00-1.025.076.688.688 0 01-.686-.626l.213-1.281z|M15 12a3 3 0 11-6 0 3 3 0 016 0z'),
 ] %}
 {% for id, href, label, icon in links %}
 <a href="{{ href }}" class="{{ link_class }}"
    style="{% if pagina_activa == id %}background: var(--surface); color: var(--title);{% else %}color: var(--muted);{% endif %}">
   <svg class="h-4 w-4 flex-shrink-0 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="{{ icon }}"/>
+    {% for path in icon.split('|') %}
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="{{ path }}"/>
+    {% endfor %}
   </svg>
   {{ label }}
 </a>
 {% endfor %}
 {% endmacro %}
 
-{% macro nav_brand(agencia) %}
-<div class="flex items-center gap-3 border-b px-5 py-5" style="border-color: var(--border);">
+{% macro nav_brand(agencia, nombre_comercial=None, sucursal_activa=None) %}
+{% set titulo = (sucursal_activa.nombre_comercial if sucursal_activa and sucursal_activa.nombre_comercial else none) or nombre_comercial or agencia.nombre %}
+{% set iniciales = titulo[:2]|upper if titulo else 'AG' %}
+<div class="nav-brand-block flex items-center gap-3 border-b px-4 py-3.5">
   {% if agencia.logo_url %}
-  <img src="{{ agencia.logo_url }}" alt="Logo" class="h-9 w-9 rounded-md object-cover" style="border: 1px solid var(--border);">
+  <img src="{{ agencia.logo_url }}" alt="Logo" class="h-9 w-9 rounded-md object-cover" style="border: 2px solid rgba(255,255,255,0.35);">
   {% else %}
-  <div class="flex h-9 w-9 items-center justify-center rounded-md bg-brand text-xs font-bold text-white">
-    {{ agencia.nombre[:2]|upper }}
+  <div class="flex h-9 w-9 items-center justify-center rounded-md text-xs font-bold text-white" style="background: rgba(255,255,255,0.2); border: 2px solid rgba(255,255,255,0.35);">
+    {{ iniciales }}
   </div>
   {% endif %}
   <div class="min-w-0">
-    <p class="truncate text-sm font-semibold" style="color: var(--title);">{{ agencia.nombre }}</p>
-    <p class="text-xs" style="color: var(--muted);">Panel</p>
+    <p class="nav-brand-title truncate text-base font-bold leading-tight">{{ titulo }}</p>
+    <p class="nav-brand-subtitle truncate text-xs font-medium">
+      {% if sucursal_activa %}{{ sucursal_activa.nombre }}{% else %}Panel{% endif %}
+    </p>
   </div>
 </div>
 {% endmacro %}

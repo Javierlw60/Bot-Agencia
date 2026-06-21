@@ -13,7 +13,7 @@ from suscripcion_agencias import (
 )
 
 _RUTA_BOT_AGENCIA = re.compile(r"^/api/bot/(\d+)")
-_RUTA_WEBHOOK_WHATSAPP = re.compile(r"^/webhook/whatsapp/([^/]+)")
+_RUTA_WEBHOOK_WHATSAPP = re.compile(r"^/webhook(?:/whatsapp/([^/]+))?$")
 
 
 class MiddlewareAgenciaActiva(BaseHTTPMiddleware):
@@ -33,9 +33,10 @@ class MiddlewareAgenciaActiva(BaseHTTPMiddleware):
         match_wa = _RUTA_WEBHOOK_WHATSAPP.match(path)
         if match_wa:
             phone_id = match_wa.group(1)
-            _, mensaje = evaluar_agencia_por_whatsapp_id(phone_id)
-            if mensaje and mensaje != "Agencia no encontrada.":
-                mensaje_bloqueo = mensaje
+            if phone_id:
+                _, mensaje = evaluar_agencia_por_whatsapp_id(phone_id)
+                if mensaje and mensaje != "Agencia no encontrada.":
+                    mensaje_bloqueo = mensaje
 
         if mensaje_bloqueo:
             # El webhook de WhatsApp gestiona el bloqueo enviando mensaje al cliente.

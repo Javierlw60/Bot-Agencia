@@ -3,7 +3,7 @@
 {% block title %}{% if auto %}Editar{% else %}Nuevo{% endif %} vehículo — {{ agencia.nombre }}{% endblock %}
 {% block content %}
 <div class="page-header">
-  <a href="/dashboard/{{ agencia.id }}/inventario" class="text-sm hover:opacity-90" style="color: var(--muted);">← Volver al inventario</a>
+  <a href="/dashboard/{{ agencia.id }}/inventario{% if sucursal_activa %}?sucursal={{ sucursal_activa.id }}{% endif %}" class="text-sm hover:opacity-90" style="color: var(--muted);">← Volver al inventario</a>
   <h1 class="page-title mt-2">{% if auto %}Editar vehículo{% else %}Nuevo vehículo{% endif %}</h1>
 </div>
 
@@ -12,6 +12,19 @@
         action="{% if auto %}/dashboard/{{ agencia.id }}/inventario/{{ auto.id }}/editar{% else %}/dashboard/{{ agencia.id }}/inventario/nuevo{% endif %}"
         class="ui-card js-save-form space-y-4 p-5 sm:p-6" novalidate>
     <h2 class="text-base font-semibold" style="color: var(--title);">Datos del vehículo</h2>
+
+    <label class="block">
+      <span class="ui-label">Sucursal *</span>
+      <select name="sucursal_id" required class="ui-select">
+        {% for suc in sucursales %}
+        <option value="{{ suc.id }}"
+          {% if auto and auto.sucursal_id == suc.id %}selected
+          {% elif not auto and suc.id == sucursal_activa.id %}selected{% endif %}>
+          {{ suc.nombre }}
+        </option>
+        {% endfor %}
+      </select>
+    </label>
 
     <div class="grid gap-4 sm:grid-cols-2">
       <label class="block">
@@ -23,8 +36,9 @@
         <input name="modelo" required value="{{ auto.modelo if auto else '' }}" class="ui-input">
       </label>
       <label class="block">
-        <span class="ui-label">Versión</span>
-        <input name="version" value="{{ auto.version if auto else '' }}" class="ui-input">
+        <span class="ui-label">Versión / equipamiento</span>
+        <input name="version" value="{{ auto.version if auto else '' }}"
+               placeholder="Ej: 1.3 Precision CVT" class="ui-input">
       </label>
       <label class="block">
         <span class="ui-label">Año *</span>
@@ -37,6 +51,12 @@
       <label class="block">
         <span class="ui-label">Patente</span>
         <input name="patente" value="{{ auto.patente if auto else '' }}" class="ui-input">
+      </label>
+      <label class="block">
+        <span class="ui-label">Kilómetros</span>
+        <input name="kilometros" type="number" min="0" step="1"
+               value="{{ auto.kilometros if auto and auto.kilometros is not none else '' }}"
+               placeholder="Ej: 45000" class="ui-input">
       </label>
       <label class="block">
         <span class="ui-label">Precio (ARS) *</span>

@@ -1,7 +1,7 @@
 import re
 
 from dashboard.media import obtener_fotos_auto
-from models.database import Auto, ProspectoLead, SessionLocal
+from models.database import Agencia, Auto, ProspectoLead, SessionLocal, Sucursal, Vendedor
 
 MARCA_ALIASES = {
     "vw": "volkswagen",
@@ -18,12 +18,157 @@ def _expandir_aliases_marca(texto: str) -> str:
     return resultado
 
 
+def _normalizar_linea_whatsapp(valor: str | None) -> str:
+    if not valor:
+        return ""
+    return re.sub(r"\D", "", str(valor))
+
+
+def _mapa_nombres_sucursales(db, agencia_id: int) -> dict[int, str]:
+    sucursales = (
+        db.query(Sucursal)
+        .filter(Sucursal.agencia_id == agencia_id)
+        .order_by(Sucursal.numero)
+        .all()
+    )
+    return {s.id: s.nombre for s in sucursales}
+
+
+def obtener_nombre_sucursal(agencia_id: int, sucursal_id: int | None) -> str:
+    if not sucursal_id:
+        return "Sucursal principal"
+    db = SessionLocal()
+    try:
+        suc = (
+            db.query(Sucursal)
+            .filter(Sucursal.id == sucursal_id, Sucursal.agencia_id == agencia_id)
+            .first()
+        )
+        return suc.nombre if suc else "Sucursal"
+    finally:
+        db.close()
+
+
+def _vendedor_principal_de_sucursal(db, sucursal: Sucursal | None) -> Vendedor | None:
+    if not sucursal:
+        return None
+    principal = (
+        db.query(Vendedor)
+        .filter(
+            Vendedor.sucursal_id == sucursal.id,
+            Vendedor.es_principal.is_(True),
+        )
+        .order_by(Vendedor.id)
+        .first()
+    )
+    if principal:
+        return principal
+    return (
+        db.query(Vendedor)
+        .filter(Vendedor.sucursal_id == sucursal.id)
+        .order_by(Vendedor.id)
+        .first()
+    )
+
+
+def resolver_destino_por_receptor_whatsapp(
+    phone_number_id: str,
+) -> tuple[Agencia | None, Sucursal | None, Vendedor | None]:
+    """
+    Identifica AGENCIA > SUCURSAL > VENDEDOR según la línea receptora.
+
+    Prioridad de ruteo:
+      1. Vendedor cuya línea (telefono_whatsapp) coincide → su sucursal y agencia.
+      2. Sucursal cuya línea coincide → su vendedor principal.
+      3. Agencia por whatsapp_phone_number_id → sucursal principal → vendedor principal.
+
+    Los teléfonos de vendedor son únicos, así que nunca se mezclan entre sucursales.
+    """
+    db = SessionLocal()
+    try:
+        normalizado = _normalizar_linea_whatsapp(phone_number_id)
+
+        # 1) Coincidencia directa por línea de vendedor.
+        for vend in db.query(Vendedor).filter(Vendedor.activo.is_(True)).all():
+            tel = vend.telefono_whatsapp or ""
+            if tel == phone_number_id or (
+                normalizado and _normalizar_linea_whatsapp(tel) == normalizado
+            ):
+                sucursal = (
+                    db.query(Sucursal).filter(Sucursal.id == vend.sucursal_id).first()
+                )
+                agencia = (
+                    db.query(Agencia).filter(Agencia.id == vend.agencia_id).first()
+                )
+                return agencia, sucursal, vend
+
+        # 2) Coincidencia por línea de sucursal (legacy) → vendedor principal.
+        for suc in db.query(Sucursal).all():
+            tel = suc.telefono_whatsapp or ""
+            if tel == phone_number_id or (
+                normalizado and _normalizar_linea_whatsapp(tel) == normalizado
+            ):
+                agencia = db.query(Agencia).filter(Agencia.id == suc.agencia_id).first()
+                return agencia, suc, _vendedor_principal_de_sucursal(db, suc)
+
+        # 3) Fallback por agencia.
+        agencia = (
+            db.query(Agencia)
+            .filter(Agencia.whatsapp_phone_number_id == phone_number_id)
+            .first()
+        )
+        if not agencia:
+            return None, None, None
+
+        suc = (
+            db.query(Sucursal)
+            .filter(Sucursal.agencia_id == agencia.id, Sucursal.es_principal.is_(True))
+            .order_by(Sucursal.numero)
+            .first()
+        )
+        if not suc:
+            suc = (
+                db.query(Sucursal)
+                .filter(Sucursal.agencia_id == agencia.id)
+                .order_by(Sucursal.numero)
+                .first()
+            )
+        return agencia, suc, _vendedor_principal_de_sucursal(db, suc)
+    finally:
+        db.close()
+
+
+def resolver_sucursal_por_receptor_whatsapp(
+    phone_number_id: str,
+) -> tuple[Agencia | None, Sucursal | None]:
+    """Compatibilidad: devuelve solo (agencia, sucursal)."""
+    agencia, sucursal, _ = resolver_destino_por_receptor_whatsapp(phone_number_id)
+    return agencia, sucursal
+
+
+def resolver_sucursal_id_cita(
+    agencia_id: int,
+    sucursal_origen_id: int | None,
+    auto_interes_id: int | None,
+) -> int | None:
+    """Sede de la cita: por defecto origen; si el auto está en otra sede, esa sede."""
+    if auto_interes_id:
+        auto = obtener_auto_por_id(agencia_id, auto_interes_id)
+        if auto and auto.sucursal_id:
+            if sucursal_origen_id and auto.sucursal_id == sucursal_origen_id:
+                return sucursal_origen_id
+            return auto.sucursal_id
+    return sucursal_origen_id
+
+
 def obtener_inventario_agencia(agencia_id: int) -> str:
     db = SessionLocal()
     try:
+        mapa = _mapa_nombres_sucursales(db, agencia_id)
         autos = (
             db.query(Auto)
             .filter(Auto.agencia_id == agencia_id, Auto.estado == "Disponible")
+            .order_by(Auto.sucursal_id, Auto.marca, Auto.modelo)
             .all()
         )
         if not autos:
@@ -33,14 +178,47 @@ def obtener_inventario_agencia(agencia_id: int) -> str:
         for auto in autos:
             fotos = obtener_fotos_auto(auto)
             foto_hint = f" | Fotos: {len(fotos)}" if fotos else ""
+            sucursal = mapa.get(auto.sucursal_id, "Sin sucursal")
+            km = f" | {auto.kilometros:,} km".replace(",", ".") if auto.kilometros else ""
             lines.append(
-                f"- ID: {auto.id} | {auto.marca} {auto.modelo} ({auto.version}) | "
-                f"Año: {auto.ano} | Tipo: {auto.tipo} | Patente: {auto.patente} | "
+                f"- ID: {auto.id} | [{sucursal}] | {auto.marca} {auto.modelo} ({auto.version}) | "
+                f"Año: {auto.ano}{km} | Tipo: {auto.tipo} | Patente: {auto.patente} | "
                 f"Precio ref.: ${auto.precio_referencia_ars:,.0f}{foto_hint}"
             )
         return "\n".join(lines)
     finally:
         db.close()
+
+
+def formatear_opciones_stock_cruzado(
+    autos: list[Auto],
+    agencia_id: int,
+    sucursal_origen_id: int | None = None,
+) -> str:
+    if not autos:
+        return ""
+
+    db = SessionLocal()
+    try:
+        mapa = _mapa_nombres_sucursales(db, agencia_id)
+    finally:
+        db.close()
+
+    origen = mapa.get(sucursal_origen_id, "la sucursal por la que te contactó")
+    lineas = [
+        "STOCK CRUZADO (todas las sedes de la agencia):",
+        f"El cliente escribió por la línea de {origen}. Proponé agendar la visita allí por defecto.",
+        "Si elige un auto que está en otra sede, ofrecé también coordinar turno en esa sede.",
+        "Opciones encontradas:",
+    ]
+    for indice, auto in enumerate(autos, start=1):
+        sucursal = mapa.get(auto.sucursal_id, "Sin sucursal")
+        km = f" · {auto.kilometros:,} km".replace(",", ".") if auto.kilometros else ""
+        lineas.append(
+            f"{indice}. [{sucursal}] {auto.marca} {auto.modelo} {auto.ano} — "
+            f"{auto.version}{km} — ${auto.precio_referencia_ars:,.0f} — ID {auto.id}"
+        )
+    return "\n".join(lineas)
 
 
 def obtener_autos_disponibles(agencia_id: int) -> list[Auto]:
@@ -132,16 +310,49 @@ def guardar_lead_comercial(
     usado_vtv_vigente: str | None = None,
     usado_es_titular: str | None = None,
     lead_id: int | None = None,
+    sucursal_id: int | None = None,
+    vendedor_id: int | None = None,
 ) -> int:
     db = SessionLocal()
     try:
+        if sucursal_id is None:
+            principal = (
+                db.query(Sucursal)
+                .filter(Sucursal.agencia_id == agencia_id, Sucursal.es_principal.is_(True))
+                .first()
+            )
+            if not principal:
+                principal = (
+                    db.query(Sucursal)
+                    .filter(Sucursal.agencia_id == agencia_id)
+                    .order_by(Sucursal.numero)
+                    .first()
+                )
+            sucursal_id = principal.id if principal else None
+        else:
+            suc = (
+                db.query(Sucursal)
+                .filter(Sucursal.id == sucursal_id, Sucursal.agencia_id == agencia_id)
+                .first()
+            )
+            if not suc:
+                sucursal_id = None
+
         if lead_id:
             lead = db.query(ProspectoLead).filter(ProspectoLead.id == lead_id).first()
             if not lead:
-                lead = ProspectoLead(agencia_id=agencia_id, telefono_cliente=telefono)
+                lead = ProspectoLead(
+                    agencia_id=agencia_id,
+                    telefono_cliente=telefono,
+                    sucursal_id=sucursal_id,
+                )
                 db.add(lead)
         else:
-            lead = ProspectoLead(agencia_id=agencia_id, telefono_cliente=telefono)
+            lead = ProspectoLead(
+                agencia_id=agencia_id,
+                telefono_cliente=telefono,
+                sucursal_id=sucursal_id,
+            )
             db.add(lead)
 
         if nombre_cliente:
@@ -166,6 +377,8 @@ def guardar_lead_comercial(
             lead.usado_vtv_vigente = usado_vtv_vigente
         if usado_es_titular:
             lead.usado_es_titular = usado_es_titular
+        if vendedor_id and getattr(lead, "vendedor_id", None) is None:
+            lead.vendedor_id = vendedor_id
 
         db.commit()
         db.refresh(lead)

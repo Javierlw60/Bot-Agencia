@@ -75,20 +75,97 @@ def obtener_historial(
         db.close()
 
 
-def resumen_comercial_lead(lead) -> dict:
-    if not lead:
-        return {}
-    items = []
-    if lead.presupuesto_estimado:
-        items.append(f"Presupuesto: ${float(lead.presupuesto_estimado):,.0f}")
+MIN_PRESUPUESTO_ARS = 500_000
+
+
+def _formatear_precio_ars(valor) -> str:
+    entero = int(round(float(valor)))
+    return "$" + f"{entero:,}".replace(",", ".")
+
+
+def _presupuesto_es_valido(valor) -> bool:
+    if valor is None:
+        return False
+    try:
+        return float(valor) >= MIN_PRESUPUESTO_ARS
+    except (TypeError, ValueError):
+        return False
+
+
+def _describir_interes(lead, cita=None) -> str | None:
+    if lead.auto:
+        partes = [lead.auto.marca, lead.auto.modelo]
+        if getattr(lead.auto, "version", None):
+            partes.append(str(lead.auto.version))
+        return " ".join(p for p in partes if p).strip() or None
+    if cita and cita.auto_interes:
+        return str(cita.auto_interes).strip() or None
+    return None
+
+
+def _describir_entrega_usado(lead) -> str | None:
+    partes: list[str] = []
     if lead.usado_marca_modelo:
-        items.append(f"Permuta/usado: {lead.usado_marca_modelo}")
-    if lead.auto and lead.auto_interes_id:
-        items.append(f"Interés: {lead.auto.marca} {lead.auto.modelo}")
-    elif lead.auto_interes_id:
-        items.append(f"Auto ID interés: {lead.auto_interes_id}")
+        partes.append(str(lead.usado_marca_modelo).strip())
+    if lead.usado_ano:
+        partes.append(str(lead.usado_ano))
+    if lead.usado_km is not None:
+        partes.append(f"{int(lead.usado_km):,} km".replace(",", "."))
+    if lead.usado_patente:
+        partes.append(f"Pat. {lead.usado_patente}")
+    if partes:
+        return " · ".join(partes)
+    if _presupuesto_es_valido(lead.presupuesto_estimado):
+        return _formatear_precio_ars(lead.presupuesto_estimado)
+    return None
+
+
+def _resolver_patente_unidad(lead, cita=None) -> str:
+    if lead.auto and getattr(lead.auto, "patente", None):
+        patente = str(lead.auto.patente).strip()
+        if patente:
+            return patente.upper()
+    if lead.auto_interes_id or lead.auto or (cita and cita.auto_interes):
+        return "Consultar unidad"
+    return "Sin asignar"
+
+
+def resumen_comercial_lead(lead, cita=None) -> dict:
+    if not lead:
+        return {"items": []}
+
+    items: list[str] = []
+    interes = _describir_interes(lead, cita)
+    precio_lista = None
+    precio_lista_label = "A cotizar"
+    patente_label = _resolver_patente_unidad(lead, cita)
+
+    if lead.auto and lead.auto.precio_referencia_ars:
+        try:
+            precio_lista = float(lead.auto.precio_referencia_ars)
+        except (TypeError, ValueError):
+            precio_lista = None
+        if precio_lista and precio_lista > 0:
+            precio_lista_label = _formatear_precio_ars(precio_lista)
+
+    if interes:
+        items.append(f"Interés: {interes}")
+        items.append(f"Precio de lista: {precio_lista_label}")
+        items.append(f"Patente: {patente_label}")
+    elif cita and cita.auto_interes:
+        items.append(f"Interés: {cita.auto_interes}")
+        items.append("Precio de lista: Consultar")
+        items.append(f"Patente: {patente_label}")
+
+    entrega = _describir_entrega_usado(lead)
+    if entrega:
+        items.append(f"Entrega/Usado estimado: {entrega}")
+
     return {
-        "presupuesto": float(lead.presupuesto_estimado) if lead.presupuesto_estimado else None,
-        "permuta": lead.usado_marca_modelo,
+        "interes": interes,
+        "precio_lista": precio_lista,
+        "precio_lista_label": precio_lista_label,
+        "patente_unidad": patente_label,
+        "entrega_usado": entrega,
         "items": items,
     }
