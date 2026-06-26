@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ titulo }} · Bot Agencias</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      line-height: 1.6;
+      max-width: 42rem;
+      margin: 2rem auto;
+      padding: 0 1.25rem;
+      color: #1e293b;
+      background: #f8fafc;
+    }
+    h1 { font-size: 1.5rem; margin-bottom: 1rem; color: #0f172a; }
+    p { margin: 0 0 1rem; white-space: pre-line; }
+    nav { margin-top: 2rem; font-size: 0.875rem; }
+    nav a { color: #2563eb; margin-right: 1rem; }
+  </style>
+</head>
+<body>
+  <h1>{{ titulo }}</h1>
+  <p>{{ contenido }}</p>
+  <nav>
+    <a href="/privacy">Privacidad</a>
+    <a href="/terms">Condiciones</a>
+    <a href="/contacto">Contacto</a>
+    <a href="/auth/login">Panel</a>
+  </nav>
+</body>
+</html>

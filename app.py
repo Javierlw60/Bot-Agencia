@@ -20,11 +20,12 @@ from pathlib import Path
 
 
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 
-from fastapi.responses import RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 
 
 
@@ -46,6 +47,7 @@ from scheduler_tareas import detener_schedulers, iniciar_schedulers
 
 
 BASE_DIR = Path(__file__).resolve().parent
+templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 (BASE_DIR / "static" / "uploads").mkdir(parents=True, exist_ok=True)
 (BASE_DIR / "static" / "cache" / "tts").mkdir(parents=True, exist_ok=True)
@@ -119,7 +121,84 @@ def health():
         "mercadopago_webhook": "/api/mercadopago/webhook",
         "whatsapp_webhook": "/webhook",
         "whatsapp_webhook_legacy": "/webhook/whatsapp/{phone_number_id}",
+        "legal": {
+            "privacy": "/privacy",
+            "terms": "/terms",
+            "contacto": "/contacto",
+        },
 
     }
+
+
+@app.get("/privacy", response_class=HTMLResponse)
+async def pagina_privacidad(request: Request):
+    return templates.TemplateResponse(
+        request=request,
+        name="legal/pagina.html",
+        context={
+            "titulo": "Política de privacidad",
+            "contenido": (
+                "Bot Agencias es un panel de gestión y asistente comercial por WhatsApp "
+                "para agencias automotrices. Recopilamos únicamente los datos necesarios "
+                "para operar el servicio: información de cuenta del panel, datos de leads "
+                "y citas, mensajes intercambiados con el bot, y metadatos técnicos "
+                "(fecha, teléfono, identificadores de WhatsApp).\n\n"
+                "Usamos estos datos para brindar el servicio contratado, mejorar la "
+                "atención comercial y cumplir obligaciones legales. No vendemos datos "
+                "personales a terceros. Los datos se almacenan en servidores seguros y "
+                "se conservan mientras la cuenta esté activa o sea requerido por ley.\n\n"
+                "Podés solicitar acceso, corrección o eliminación de tus datos en la "
+                "página de contacto (/contacto). Para consultas sobre privacidad, escribinos "
+                "desde el correo registrado en tu cuenta de agencia."
+            ),
+        },
+    )
+
+
+@app.get("/terms", response_class=HTMLResponse)
+async def pagina_terminos(request: Request):
+    return templates.TemplateResponse(
+        request=request,
+        name="legal/pagina.html",
+        context={
+            "titulo": "Condiciones del servicio",
+            "contenido": (
+                "Al usar Bot Agencias aceptás estas condiciones. El servicio permite "
+                "gestionar inventario, leads, citas y conversaciones comerciales por "
+                "WhatsApp bajo suscripción.\n\n"
+                "La agencia es responsable de la veracidad de la información cargada, "
+                "del cumplimiento de normas de protección al consumidor y de contar con "
+                "consentimiento válido para contactar a sus clientes por WhatsApp.\n\n"
+                "Nos reservamos el derecho de suspender cuentas por incumplimiento, "
+                "uso abusivo o falta de pago. El servicio se provee \"tal cual\"; no "
+                "garantizamos disponibilidad ininterrumpida. Las modificaciones a estas "
+                "condiciones se publicarán en esta misma URL."
+            ),
+        },
+    )
+
+
+@app.get("/contacto", response_class=HTMLResponse)
+async def pagina_contacto(request: Request):
+    return templates.TemplateResponse(
+        request=request,
+        name="legal/pagina.html",
+        context={
+            "titulo": "Contacto y eliminación de datos",
+            "contenido": (
+                "Si deseás eliminar tus datos personales asociados a Bot Agencias, "
+                "seguí estos pasos:\n\n"
+                "1. Enviá un correo desde la dirección registrada en tu cuenta de agencia "
+                "indicando \"Solicitud de eliminación de datos\".\n"
+                "2. Incluí tu nombre, nombre de la agencia y teléfono vinculado al bot.\n"
+                "3. Procesaremos la solicitud en un plazo máximo de 30 días hábiles y "
+                "confirmaremos por correo cuando la eliminación haya finalizado.\n\n"
+                "También podés solicitar acceso, rectificación o exportación de tus datos "
+                "por el mismo canal. Si sos cliente final de una agencia (usuario de "
+                "WhatsApp), contactá directamente a la agencia; ellos gestionan tus datos "
+                "como responsables del tratamiento."
+            ),
+        },
+    )
 
 
