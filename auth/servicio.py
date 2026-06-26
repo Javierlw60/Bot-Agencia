@@ -14,6 +14,8 @@ from models.database import Agencia, TokenVerificacion, Usuario
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _DURACION_EMAIL_HORAS = 24
 _DURACION_2FA_MIN = 10
+_EMAIL_ADMIN_DEMO = "admin@demo.local"
+CODIGO_2FA_DESARROLLO = "123456"
 
 
 def _normalizar_email(email: str) -> str:
@@ -30,6 +32,27 @@ def _generar_codigo_6() -> str:
 
 def _hash_token(valor: str) -> str:
     return hashlib.sha256(valor.encode("utf-8")).hexdigest()
+
+
+def _flag_env_activa(nombre: str) -> bool:
+    return os.getenv(nombre, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def usar_2fa_desarrollo(email: str, *, es_entorno_local: bool = False) -> bool:
+    """En local/demo no envía WhatsApp real y puede omitir el paso 2FA."""
+    if es_entorno_local:
+        return True
+    email_norm = _normalizar_email(email)
+    if email_norm == _EMAIL_ADMIN_DEMO:
+        return True
+    if _flag_env_activa("AUTH_2FA_DEV") or _flag_env_activa("AUTH_DEV_BYPASS"):
+        return True
+    base_url = (
+        os.getenv("DASHBOARD_BASE_URL")
+        or os.getenv("APP_URL")
+        or ""
+    ).strip().lower()
+    return any(host in base_url for host in ("127.0.0.1", "localhost", "0.0.0.0"))
 
 
 def _crear_token(db: Session, usuario_id: int, tipo: str, valor_plano: str, horas: float) -> str:
@@ -133,14 +156,28 @@ def verificar_email(db: Session, token: str) -> tuple[bool, str]:
     return True, "Correo verificado. Ya podés iniciar sesión."
 
 
-def iniciar_login(db: Session, email: str, password: str) -> tuple[Usuario | None, str | None]:
+def iniciar_login(
+    db: Session,
+    email: str,
+    password: str,
+    *,
+    es_entorno_local: bool = False,
+) -> tuple[Usuario | None, str | None, bool]:
+    """Devuelve (usuario, error, ingreso_directo). ingreso_directo=True omite el paso 2FA."""
     email_norm = _normalizar_email(email)
     usuario = db.query(Usuario).filter(Usuario.email == email_norm, Usuario.activo.is_(True)).first()
     if not usuario or not verificar_password(password, usuario.password_hash):
-        return None, "Correo o contraseña incorrectos."
+        return None, "Correo o contraseña incorrectos.", False
 
     if not usuario.email_verificado:
-        return None, "Confirmá tu correo antes de ingresar. Revisá tu bandeja de entrada."
+        return None, "Confirmá tu correo antes de ingresar. Revisá tu bandeja de entrada.", False
+
+    if usar_2fa_desarrollo(email_norm, es_entorno_local=es_entorno_local):
+        print(
+            f"[AUTH DEV] Ingreso directo sin WhatsApp/2FA para {email_norm} "
+            f"(local={es_entorno_local})."
+        )
+        return usuario, None, True
 
     codigo = _generar_codigo_6()
     _crear_token(db, usuario.id, "login_2fa", codigo, _DURACION_2FA_MIN / 60)
@@ -148,9 +185,15 @@ def iniciar_login(db: Session, email: str, password: str) -> tuple[Usuario | Non
 
     enviado = enviar_codigo_2fa(usuario.telefono_whatsapp, codigo, usuario.nombre)
     if not enviado:
-        return None, "No pudimos enviar el código por WhatsApp. Revisá la configuración o intentá más tarde."
+        if usar_2fa_desarrollo(email_norm, es_entorno_local=True):
+            print(
+                f"[AUTH DEV] WhatsApp falló para {email_norm}; "
+                f"ingreso directo habilitado en modo demo/local."
+            )
+            return usuario, None, True
+        return None, "No pudimos enviar el código por WhatsApp. Revisá la configuración o intentá más tarde.", False
 
-    return usuario, None
+    return usuario, None, False
 
 
 def confirmar_2fa(db: Session, usuario_id: int, codigo: str) -> tuple[Usuario | None, str | None]:

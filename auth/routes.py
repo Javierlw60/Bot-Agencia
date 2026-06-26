@@ -10,9 +10,12 @@ from auth.sesiones import (
     crear_token_sesion,
 )
 from auth.servicio import (
+    CODIGO_2FA_DESARROLLO,
     confirmar_2fa,
     iniciar_login,
+    obtener_usuario_por_id,
     registrar_usuario,
+    usar_2fa_desarrollo,
     verificar_email,
 )
 from models.database import SessionLocal
@@ -26,6 +29,14 @@ _COOKIE_OPTS = {
     "samesite": "lax",
     "max_age": 60 * 60 * 24 * 7,
 }
+
+
+def _es_host_local(request: Request) -> bool:
+    host = (request.url.hostname or "").lower()
+    if host in {"127.0.0.1", "localhost", "::1"}:
+        return True
+    client = (request.client.host if request.client else "").lower()
+    return client in {"127.0.0.1", "::1"}
 
 
 @router.get("/login", response_class=HTMLResponse)
@@ -48,12 +59,29 @@ async def pagina_registro(request: Request):
 
 @router.get("/verificar-2fa", response_class=HTMLResponse)
 async def pagina_verificar_2fa(request: Request):
+    from auth.sesiones import leer_pendiente_2fa
+
     if not request.cookies.get(COOKIE_PENDIENTE_2FA):
         return RedirectResponse(url="/auth/login?error=sesion_2fa", status_code=303)
+
+    codigo_desarrollo = None
+    pendiente = leer_pendiente_2fa(request.cookies.get(COOKIE_PENDIENTE_2FA))
+    if pendiente:
+        db = SessionLocal()
+        try:
+            usuario = obtener_usuario_por_id(db, pendiente["uid"])
+            if usuario and usar_2fa_desarrollo(usuario.email):
+                codigo_desarrollo = CODIGO_2FA_DESARROLLO
+        finally:
+            db.close()
+
     return templates.TemplateResponse(
         request=request,
         name="auth/verificar_2fa.html",
-        context={"error": request.query_params.get("error")},
+        context={
+            "error": request.query_params.get("error"),
+            "codigo_desarrollo": codigo_desarrollo,
+        },
     )
 
 
@@ -97,16 +125,27 @@ async def procesar_registro(
 
 
 @router.post("/login")
-async def procesar_login(email: str = Form(...), password: str = Form(...)):
+async def procesar_login(request: Request, email: str = Form(...), password: str = Form(...)):
     db = SessionLocal()
     try:
-        usuario, error = iniciar_login(db, email, password)
+        usuario, error, ingreso_directo = iniciar_login(
+            db,
+            email,
+            password,
+            es_entorno_local=_es_host_local(request),
+        )
         if error or not usuario:
             from urllib.parse import quote
             return RedirectResponse(
                 url=f"/auth/login?error={quote(error or 'No se pudo iniciar sesión.')}",
                 status_code=303,
             )
+        if ingreso_directo:
+            sesion = crear_token_sesion(usuario.id, usuario.agencia_id)
+            resp = RedirectResponse(url=f"/dashboard/{usuario.agencia_id}", status_code=303)
+            resp.set_cookie(COOKIE_SESION, sesion, **_COOKIE_OPTS)
+            return resp
+
         token_2fa = crear_token_pendiente_2fa(usuario.id)
         resp = RedirectResponse(url="/auth/verificar-2fa", status_code=303)
         resp.set_cookie(

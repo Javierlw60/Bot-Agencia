@@ -11,6 +11,12 @@
   <div class="auth-alert auth-alert-error mt-4">{{ error }}</div>
   {% endif %}
 
+  {% if codigo_desarrollo %}
+  <div class="auth-alert mt-4" style="border-color: rgba(59,130,246,.35); background: rgba(59,130,246,.08); color: var(--title);">
+    Modo desarrollo: no se envía WhatsApp. Usá el código <strong>{{ codigo_desarrollo }}</strong>.
+  </div>
+  {% endif %}
+
   <form method="post" action="/auth/verificar-2fa" class="js-save-form mt-5 space-y-4" novalidate>
     <label class="block">
       <span class="ui-label">Código de acceso</span>

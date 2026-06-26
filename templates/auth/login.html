@@ -3,7 +3,11 @@
 {% block content %}
 <div class="ui-card p-6">
   <h1 class="text-lg font-semibold" style="color: var(--title);">Iniciar sesión</h1>
-  <p class="mt-1 text-sm" style="color: var(--muted);">Ingresá con tu correo. Te enviaremos un código por WhatsApp.</p>
+  <p class="mt-1 text-sm" style="color: var(--muted);">Ingresá con tu correo. En producción te enviamos un código por WhatsApp.</p>
+  <p class="mt-2 text-xs leading-relaxed" style="color: var(--muted);">
+    Prueba local: <strong style="color: var(--title);">admin@demo.local</strong> / <strong style="color: var(--title);">Demo1234</strong>
+    (en <code>127.0.0.1</code> entrás directo al panel, sin WhatsApp).
+  </p>
 
   {% if error %}
   <div class="auth-alert auth-alert-error mt-4">{{ error }}</div>
@@ -14,7 +18,7 @@
   <form method="post" action="/auth/login" class="js-save-form mt-5 space-y-4" novalidate>
     <label class="block">
       <span class="ui-label">Correo electrónico</span>
-      <input type="email" name="email" required autocomplete="email" class="ui-input" placeholder="tu@agencia.com">
+      <input type="email" name="email" required autocomplete="email" class="ui-input" placeholder="admin@demo.local" value="admin@demo.local">
     </label>
     <label class="block">
       <span class="ui-label">Contraseña</span>
