@@ -184,7 +184,11 @@ def enviar_mensaje_texto_whatsapp(
         try:
             _post_json(url, payload, token)
             return True
-        except Exception:
+        except Exception as exc:
+            print(
+                f"[WHATSAPP] Error enviando texto a +{telefono} "
+                f"(linea {whatsapp_phone_number_id}): {exc}"
+            )
             return False
 
     print(f"[WHATSAPP] Modo desconocido: {modo}")

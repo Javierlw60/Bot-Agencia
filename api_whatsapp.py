@@ -12,6 +12,7 @@ from models.database import Agencia, SessionLocal, Sucursal, Vendedor
 from suscripcion_agencias import evaluar_agencia_para_operar
 from whatsapp_config import whatsapp_phone_number_id, whatsapp_verify_token
 from whatsapp_entrada import procesar_audio_whatsapp, procesar_texto_whatsapp
+from whatsapp_linea import linea_envio_whatsapp_api, parece_celular_argentino
 
 logger = logging.getLogger(__name__)
 
@@ -196,12 +197,14 @@ def _log_resultado_ruteo(
                 f"{_LOG_PREFIX}   Vendedor: id={vendedor.id} nombre={vendedor.nombre!r} "
                 f"telefono_whatsapp={vendedor.telefono_whatsapp!r}"
             )
-        linea_envio = _linea_whatsapp_respuesta(agencia, sucursal, vendedor)
+        linea_envio = _linea_whatsapp_respuesta(
+            agencia, sucursal, vendedor, phone_number_id_receptor=phone_id_buscado
+        )
         print(f"{_LOG_PREFIX}   Línea que se usará para ENVIAR respuesta = {linea_envio!r}")
-        if _avisos_formato_phone_number_id(linea_envio):
+        if parece_celular_argentino(linea_envio):
             print(
-                f"{_LOG_PREFIX}   AVISO ENVÍO: la línea de respuesta parece incorrecta "
-                f"(debe ser Phone Number ID de Meta, no celular 549…)."
+                f"{_LOG_PREFIX}   AVISO ENVÍO: la línea parece celular 549…; "
+                f"debe ser Phone Number ID de Meta."
             )
     else:
         print(
@@ -215,12 +218,15 @@ def _linea_whatsapp_respuesta(
     agencia: Agencia,
     sucursal: Sucursal | None,
     vendedor: Vendedor | None = None,
+    *,
+    phone_number_id_receptor: str | None = None,
 ) -> str:
-    if vendedor and vendedor.telefono_whatsapp:
-        return vendedor.telefono_whatsapp
-    if sucursal and sucursal.telefono_whatsapp:
-        return sucursal.telefono_whatsapp
-    return agencia.whatsapp_phone_number_id
+    return linea_envio_whatsapp_api(
+        agencia,
+        phone_number_id_receptor=phone_number_id_receptor,
+        sucursal=sucursal,
+        vendedor=vendedor,
+    )
 
 
 def _extraer_mensajes(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -276,7 +282,9 @@ def _procesar_un_mensaje(
         logger.warning("Webhook WA sin agencia para phone_id=%s", phone_number_id)
         return {"ok": False, "motivo": "Agencia no encontrada", "phone_number_id": phone_number_id}
 
-    linea_respuesta = _linea_whatsapp_respuesta(agencia, sucursal, vendedor)
+    linea_respuesta = _linea_whatsapp_respuesta(
+        agencia, sucursal, vendedor, phone_number_id_receptor=phone_number_id
+    )
 
     puede, mensaje_bloqueo = evaluar_agencia_para_operar(agencia.id)
     if not puede:
@@ -295,7 +303,12 @@ def _procesar_un_mensaje(
     tipo = msg.get("type")
     if tipo == "text" and msg.get("text"):
         respuesta = procesar_texto_whatsapp(
-            agencia, telefono, msg["text"], sucursal=sucursal, vendedor=vendedor
+            agencia,
+            telefono,
+            msg["text"],
+            sucursal=sucursal,
+            vendedor=vendedor,
+            phone_number_id_meta=phone_number_id,
         )
         return {"ok": True, "tipo": "text", "respuesta": respuesta, "phone_number_id": phone_number_id}
     if tipo == "audio" and msg.get("audio_id"):
@@ -306,6 +319,7 @@ def _procesar_un_mensaje(
             whatsapp_message_id=msg.get("id"),
             sucursal=sucursal,
             vendedor=vendedor,
+            phone_number_id_meta=phone_number_id,
         )
         return {"ok": True, "tipo": "audio", "phone_number_id": phone_number_id, **resultado}
     return {"ok": True, "tipo": tipo, "ignorado": True, "phone_number_id": phone_number_id}

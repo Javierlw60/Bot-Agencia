@@ -12,6 +12,7 @@ from bot import SesionCliente, _enviar_bienvenida_inicial, _finalizar_y_guardar_
 from models.database import Agencia, Sucursal, Vendedor
 from sesiones_bot import obtener_o_crear_sesion
 from whatsapp import descargar_media_whatsapp, enviar_respuesta_bot
+from whatsapp_linea import linea_envio_whatsapp_api
 
 DIR_TEMP_AUDIO = Path(__file__).resolve().parent / "static" / "temp" / "whatsapp"
 
@@ -20,6 +21,8 @@ def _aplicar_sucursal_sesion(
     sesion: SesionCliente,
     sucursal: Sucursal | None,
     vendedor: Vendedor | None = None,
+    *,
+    phone_number_id_meta: str | None = None,
 ) -> None:
     if sucursal:
         sesion.sucursal_origen_id = sucursal.id
@@ -27,16 +30,22 @@ def _aplicar_sucursal_sesion(
         sesion.vendedor_origen_id = vendedor.id
         if vendedor.sucursal_id:
             sesion.sucursal_origen_id = vendedor.sucursal_id
-        if vendedor.telefono_whatsapp:
-            sesion.line_whatsapp_id = vendedor.telefono_whatsapp
-    elif sucursal and sucursal.telefono_whatsapp:
-        sesion.line_whatsapp_id = sucursal.telefono_whatsapp
+    if phone_number_id_meta:
+        sesion.line_whatsapp_id = phone_number_id_meta
 
 
-def _linea_whatsapp_respuesta(agencia: Agencia, sesion: SesionCliente) -> str:
-    if sesion.line_whatsapp_id:
-        return sesion.line_whatsapp_id
-    return agencia.whatsapp_phone_number_id
+def _linea_whatsapp_respuesta(
+    agencia: Agencia,
+    sesion: SesionCliente,
+    sucursal: Sucursal | None = None,
+    vendedor: Vendedor | None = None,
+) -> str:
+    return linea_envio_whatsapp_api(
+        agencia,
+        phone_number_id_receptor=sesion.line_whatsapp_id,
+        sucursal=sucursal,
+        vendedor=vendedor,
+    )
 
 
 def procesar_texto_whatsapp(
@@ -45,10 +54,14 @@ def procesar_texto_whatsapp(
     texto: str,
     sucursal: Sucursal | None = None,
     vendedor: Vendedor | None = None,
+    *,
+    phone_number_id_meta: str | None = None,
 ) -> str:
     """Pasa un mensaje escrito a la lógica principal del bot."""
     sesion = obtener_o_crear_sesion(agencia.id, telefono)
-    _aplicar_sucursal_sesion(sesion, sucursal, vendedor)
+    _aplicar_sucursal_sesion(
+        sesion, sucursal, vendedor, phone_number_id_meta=phone_number_id_meta
+    )
     _enviar_bienvenida_inicial(sesion, agencia, via_whatsapp=True)
     respuesta = _procesar_mensaje(sesion, agencia, texto, via_whatsapp=True)
     _finalizar_y_guardar_lead(sesion)
@@ -62,6 +75,8 @@ def procesar_audio_whatsapp(
     whatsapp_message_id: str | None = None,
     sucursal: Sucursal | None = None,
     vendedor: Vendedor | None = None,
+    *,
+    phone_number_id_meta: str | None = None,
 ) -> dict:
     """
     Flujo completo de audio entrante:
@@ -88,7 +103,9 @@ def procesar_audio_whatsapp(
             mp_media_id=media_id,
         )
         sesion = obtener_o_crear_sesion(agencia.id, telefono)
-        _aplicar_sucursal_sesion(sesion, sucursal, vendedor)
+        _aplicar_sucursal_sesion(
+            sesion, sucursal, vendedor, phone_number_id_meta=phone_number_id_meta
+        )
         auditoria_id = registrar_interaccion_audio(
             agencia_id=agencia.id,
             telefono=telefono,
@@ -114,14 +131,18 @@ def procesar_audio_whatsapp(
         return resultado
     except SpeechToTextError as exc:
         sesion = obtener_o_crear_sesion(agencia.id, telefono)
-        _aplicar_sucursal_sesion(sesion, sucursal, vendedor)
+        _aplicar_sucursal_sesion(
+            sesion, sucursal, vendedor, phone_number_id_meta=phone_number_id_meta
+        )
         mensaje_error = (
             "No pude entender el audio. ¿Podés escribirme tu consulta por texto?"
         )
         enviar_respuesta_bot(
             telefono_destino=telefono,
             mensaje=mensaje_error,
-            whatsapp_phone_number_id=_linea_whatsapp_respuesta(agencia, sesion),
+            whatsapp_phone_number_id=_linea_whatsapp_respuesta(
+                agencia, sesion, sucursal=sucursal, vendedor=vendedor
+            ),
             modo_respuesta=agencia.modo_respuesta,
             imprimir_texto_en_consola=False,
         )

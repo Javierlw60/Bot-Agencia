@@ -30,6 +30,7 @@ from inventory import (
 )
 from models.database import Agencia, SessionLocal, inicializar_base_de_datos
 from whatsapp import enviar_respuesta_bot
+from whatsapp_linea import linea_envio_whatsapp_api
 from permuta import (
     INSTRUCCIONES_PERMUTA,
     extraer_datos_usado_en_segundo_plano,
@@ -190,9 +191,14 @@ def _entregar_respuesta_whatsapp(
     """Muestra la respuesta en consola y/o la envía por WhatsApp (texto/voz/ambas)."""
     if not via_whatsapp:
         print("\nBot:", texto)
-    line_id = agencia.whatsapp_phone_number_id
-    if sesion and sesion.line_whatsapp_id:
-        line_id = sesion.line_whatsapp_id
+    sucursal = _sucursal_sesion_bot(sesion) if sesion else None
+    vendedor = _vendedor_sesion_bot(sesion) if sesion else None
+    line_id = linea_envio_whatsapp_api(
+        agencia,
+        phone_number_id_receptor=sesion.line_whatsapp_id if sesion else None,
+        sucursal=sucursal,
+        vendedor=vendedor,
+    )
     enviar_respuesta_bot(
         telefono_destino=telefono,
         mensaje=texto,
