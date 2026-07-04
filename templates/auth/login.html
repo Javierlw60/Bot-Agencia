@@ -27,6 +27,49 @@
     <button type="submit" class="btn-primary" data-saving-text="Verificando...">Continuar</button>
   </form>
 
+  <div class="relative my-5">
+    <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-gray-700"></div></div>
+    <div class="relative flex justify-center text-xs uppercase"><span class="bg-gray-900 px-2 text-gray-400" style="background: var(--card-bg, #1e1e2e);">O también</span></div>
+  </div>
+
+  <button id="btn-google" type="button" class="w-full flex items-center justify-center gap-2 border border-gray-600 rounded-lg p-2 text-sm font-medium text-white hover:bg-gray-800 transition-colors" style="background: transparent; border-color: var(--border);">
+    <svg class="h-5 w-5" viewBox="0 0 24 24" width="24" height="24" xmlns="http://www.w3.org/2000/svg">
+      <g transform="matrix(1, 0, 0, 1, 0, 0)">
+        <path d="M21.35,11.1H12v2.7h5.38c-0.24,1.28 -0.96,2.37 -2.04,3.1v2.57h3.3c1.93,-1.78 3.04,-4.4 3.04,-7.49c0,-0.61 -0.05,-1.2 -0.15,-1.67Z" fill="#4285F4" />
+        <path d="M12,20.68c2.43,0 4.47,-0.8 5.96,-2.18l-3.3,-2.57c-0.9,0.6 -2.07,0.97 -3.33,0.97c-2.34,0 -4.33,-1.58 -5.03,-3.71H2.93v2.65c1.48,2.94 4.52,4.94 8.07,4.94Z" fill="#34A853" />
+        <path d="M6.97,13.19c-0.18,-0.54 -0.28,-1.11 -0.28,-1.7c0,-0.59 0.1,-1.16 0.28,-1.7V7.14H2.93c-0.6,1.21 -0.93,2.57 -0.93,4.01c0,1.44 0.33,2.8 0.93,4.01l4.04,-3.13Z" fill="#FBBC05" />
+        <path d="M12,6.12c1.32,0 2.51,0.45 3.44,1.35l2.58,-2.59c-1.56,-1.46 -3.59,-2.35 -6.02,-2.35c-3.55,0 -6.59,2 -8.07,4.94l4.04,3.13c0.7,-2.13 2.69,-3.71 5.03,-3.71Z" fill="#EA4335" />
+      </g>
+    </svg>
+    Ingresar con Google
+  </button>
+
   <p class="auth-link mt-5 text-center">¿No tenés cuenta? <a href="/auth/registro">Registrate</a></p>
 </div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<script>
+  // Poné acá los datos que te da tu proyecto de Supabase (en la configuración de Supabase)
+  const SUPABASE_URL = "https://qpolqhguhotcshynuniz.supabase.co"; 
+  const SUPABASE_ANON_KEY = "sb_publishable_n09B0W9kLBIDKdXUdYmtNg_fWbmvVLa";
+
+  // Inicializamos el cliente de Supabase
+  const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  // Escuchamos el clic en el botón de Google
+  document.getElementById('btn-google').addEventListener('click', async () => {
+    const { data, error } = await supabaseClient.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        // Al terminar el login con Google, Supabase devuelve al usuario a tu endpoint de Python
+        redirectTo: window.location.origin + '/auth/supabase-callback'
+      }
+    });
+
+    if (error) {
+      alert("Error al conectar con Google: " + error.message);
+    }
+  });
+</script>
 {% endblock %}

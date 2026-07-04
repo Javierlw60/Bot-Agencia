@@ -193,3 +193,55 @@ async def cerrar_sesion():
     resp.delete_cookie(COOKIE_SESION)
     resp.delete_cookie(COOKIE_PENDIENTE_2FA)
     return resp
+
+# =====================================================================
+# ENDPOINT PARA GOOGLE OAUTH CON SUPABASE
+# =====================================================================
+@router.get("/supabase-callback")
+async def supabase_callback(request: Request, email: str = "", nombre: str = ""):
+    """
+    Recibe la confirmación de login de Supabase.
+    Si el usuario no existe en la base de datos de la agencia, lo registra con una nueva.
+    """
+    if not email:
+        return RedirectResponse(url="/auth/login?error=No se recibió un correo válido de Google.", status_code=303)
+
+    db = SessionLocal()
+    try:
+        from models.models import Usuario, Agencia  # Ajustá la importación según tus modelos locales
+        
+        # 1. Verificar si el usuario ya existe por su email
+        usuario = db.query(Usuario).filter(Usuario.email == email).first()
+        
+        if not usuario:
+            # Si el usuario es nuevo (se logueó con Google de una), le creamos su Agencia de prueba
+            nueva_agencia = Agencia(nombre=f"Agencia de {nombre or 'Nuevo Usuario'}")
+            db.add(nueva_agencia)
+            db.commit()
+            db.refresh(nueva_agencia)
+            
+            # Registramos el nuevo usuario asignado a esa agencia
+            usuario = Usuario(
+                email=email,
+                nombre=nombre or email.split("@")[0],
+                agencia_id=nueva_agencia.id,
+                telefono="",
+                activo=True
+            )
+            db.add(usuario)
+            db.commit()
+            db.refresh(usuario)
+        
+        # 2. Generar el token de sesión idéntico al tuyo tradicional
+        sesion = crear_token_sesion(usuario.id, usuario.agencia_id)
+        
+        # 3. Redirigir directo al dashboard fucsia de su sucursal
+        resp = RedirectResponse(url=f"/dashboard/{usuario.agencia_id}", status_code=303)
+        resp.set_cookie(COOKIE_SESION, sesion, **_COOKIE_OPTS)
+        return resp
+        
+    except Exception as e:
+        print(f"Error en callback Supabase: {str(e)}")
+        return RedirectResponse(url=f"/auth/login?error=Error interno al procesar el acceso con Google.", status_code=303)
+    finally:
+        db.close()
