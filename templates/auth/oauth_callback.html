@@ -12,13 +12,39 @@
   const SUPABASE_URL = {{ supabase_url|tojson }};
   const SUPABASE_ANON_KEY = {{ supabase_anon_key|tojson }};
   const estado = document.getElementById('estado');
-  const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
   function irLogin(mensaje) {
     estado.textContent = mensaje;
     setTimeout(function () {
       window.location.href = '/auth/login?error=' + encodeURIComponent(mensaje);
-    }, 1200);
+    }, 1500);
+  }
+
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+    irLogin('Faltan SUPABASE_URL o SUPABASE_ANON_KEY en el servidor (Render).');
+    return;
+  }
+
+  const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    auth: {
+      flowType: 'pkce',
+      detectSessionInUrl: true,
+    },
+  });
+
+  async function sesionDesdeHash() {
+    const hash = window.location.hash.replace(/^#/, '');
+    if (!hash) return null;
+    const params = new URLSearchParams(hash);
+    const access_token = params.get('access_token');
+    const refresh_token = params.get('refresh_token');
+    if (!access_token) return null;
+    const { data, error } = await supabaseClient.auth.setSession({
+      access_token: access_token,
+      refresh_token: refresh_token || '',
+    });
+    if (error) throw error;
+    return data.session;
   }
 
   async function finalizar() {
@@ -28,6 +54,8 @@
       if (code) {
         const { error } = await supabaseClient.auth.exchangeCodeForSession(code);
         if (error) throw error;
+      } else {
+        await sesionDesdeHash();
       }
 
       const { data, error: sessionError } = await supabaseClient.auth.getSession();
@@ -43,16 +71,15 @@
         (user.user_metadata && (user.user_metadata.full_name || user.user_metadata.name)) ||
         user.email.split('@')[0];
 
-      const destino =
+      window.location.replace(
         '/auth/supabase-callback?email=' +
-        encodeURIComponent(user.email) +
-        '&nombre=' +
-        encodeURIComponent(nombre);
-
-      window.location.replace(destino);
+          encodeURIComponent(user.email) +
+          '&nombre=' +
+          encodeURIComponent(nombre)
+      );
     } catch (err) {
-      irLogin('Error al completar el acceso con Google.');
       console.error(err);
+      irLogin('Error al completar el acceso con Google.');
     }
   }
 

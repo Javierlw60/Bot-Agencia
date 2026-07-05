@@ -50,12 +50,28 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <script>
+  (function () {
+    var hash = window.location.hash || '';
+    var search = window.location.search || '';
+    if (
+      hash.indexOf('access_token=') !== -1 ||
+      hash.indexOf('refresh_token=') !== -1 ||
+      search.indexOf('code=') !== -1
+    ) {
+      window.location.replace('/auth/oauth-callback' + search + hash);
+    }
+  })();
+</script>
+
+<script>
   // Poné acá los datos que te da tu proyecto de Supabase (en la configuración de Supabase)
   const SUPABASE_URL = {{ (supabase_url or '')|tojson }};
   const SUPABASE_ANON_KEY = {{ (supabase_anon_key or '')|tojson }};
 
   // Inicializamos el cliente de Supabase
-  const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    auth: { flowType: 'pkce', detectSessionInUrl: true },
+  });
 
   // Escuchamos el clic en el botón de Google
   document.getElementById('btn-google').addEventListener('click', async () => {

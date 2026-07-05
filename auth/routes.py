@@ -223,9 +223,14 @@ async def supabase_callback(request: Request, email: str = "", nombre: str = "")
     """Recibe email/nombre tras OAuth en el cliente y abre sesión en la BD local."""
     email_norm = email.strip().lower()
     if not email_norm:
-        return RedirectResponse(
-            url="/auth/login?error=No se recibió un correo válido de Google.",
-            status_code=303,
+        # Config vieja de Supabase o token en #hash: completar en el browser.
+        return templates.TemplateResponse(
+            request=request,
+            name="auth/oauth_callback.html",
+            context={
+                "supabase_url": os.getenv("SUPABASE_URL", "").strip(),
+                "supabase_anon_key": os.getenv("SUPABASE_ANON_KEY", "").strip(),
+            },
         )
 
     db = SessionLocal()
