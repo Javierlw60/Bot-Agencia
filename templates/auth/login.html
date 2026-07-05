@@ -51,20 +51,20 @@
 
 <script>
   // Poné acá los datos que te da tu proyecto de Supabase (en la configuración de Supabase)
-  const SUPABASE_URL = "https://qpolqhguhotcshynuniz.supabase.co"; 
-  const SUPABASE_ANON_KEY = "sb_publishable_n09B0W9kLBIDKdXUdYmtNg_fWbmvVLa";
+  const SUPABASE_URL = {{ (supabase_url or '')|tojson }};
+  const SUPABASE_ANON_KEY = {{ (supabase_anon_key or '')|tojson }};
 
   // Inicializamos el cliente de Supabase
   const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
   // Escuchamos el clic en el botón de Google
   document.getElementById('btn-google').addEventListener('click', async () => {
-    const { data, error } = await supabaseClient.auth.signInWithOAuth({
+    const { error } = await supabaseClient.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        // Al terminar el login con Google, Supabase devuelve al usuario a tu endpoint de Python
-        redirectTo: window.location.origin + '/auth/supabase-callback'
-      }
+        redirectTo: window.location.origin + '/auth/oauth-callback',
+        queryParams: { prompt: 'select_account' },
+      },
     });
 
     if (error) {

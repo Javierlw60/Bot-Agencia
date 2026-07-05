@@ -2,7 +2,10 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
+import os
+import secrets
 
+from auth.passwords import hash_password
 from auth.sesiones import (
     COOKIE_PENDIENTE_2FA,
     COOKIE_SESION,
@@ -18,7 +21,7 @@ from auth.servicio import (
     usar_2fa_desarrollo,
     verificar_email,
 )
-from models.database import SessionLocal
+from models.database import Agencia, SessionLocal, Usuario
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -44,7 +47,12 @@ async def pagina_login(request: Request):
     return templates.TemplateResponse(
         request=request,
         name="auth/login.html",
-        context={"error": request.query_params.get("error"), "ok": request.query_params.get("ok")},
+        context={
+            "error": request.query_params.get("error"),
+            "ok": request.query_params.get("ok"),
+            "supabase_url": os.getenv("SUPABASE_URL", "").strip(),
+            "supabase_anon_key": os.getenv("SUPABASE_ANON_KEY", "").strip(),
+        },
     )
 
 
@@ -187,6 +195,19 @@ async def procesar_verificar_2fa(request: Request, codigo: str = Form(...)):
         db.close()
 
 
+@router.get("/oauth-callback", response_class=HTMLResponse)
+async def pagina_oauth_callback(request: Request):
+    """Página intermedia: Supabase devuelve acá; el JS completa la sesión y llama al backend."""
+    return templates.TemplateResponse(
+        request=request,
+        name="auth/oauth_callback.html",
+        context={
+            "supabase_url": os.getenv("SUPABASE_URL", "").strip(),
+            "supabase_anon_key": os.getenv("SUPABASE_ANON_KEY", "").strip(),
+        },
+    )
+
+
 @router.post("/cerrar-sesion")
 async def cerrar_sesion():
     resp = RedirectResponse(url="/auth/login", status_code=303)
@@ -199,49 +220,53 @@ async def cerrar_sesion():
 # =====================================================================
 @router.get("/supabase-callback")
 async def supabase_callback(request: Request, email: str = "", nombre: str = ""):
-    """
-    Recibe la confirmación de login de Supabase.
-    Si el usuario no existe en la base de datos de la agencia, lo registra con una nueva.
-    """
-    if not email:
-        return RedirectResponse(url="/auth/login?error=No se recibió un correo válido de Google.", status_code=303)
+    """Recibe email/nombre tras OAuth en el cliente y abre sesión en la BD local."""
+    email_norm = email.strip().lower()
+    if not email_norm:
+        return RedirectResponse(
+            url="/auth/login?error=No se recibió un correo válido de Google.",
+            status_code=303,
+        )
 
     db = SessionLocal()
     try:
-        from models.models import Usuario, Agencia  # Ajustá la importación según tus modelos locales
-        
-        # 1. Verificar si el usuario ya existe por su email
-        usuario = db.query(Usuario).filter(Usuario.email == email).first()
-        
+        usuario = db.query(Usuario).filter(Usuario.email == email_norm).first()
+
         if not usuario:
-            # Si el usuario es nuevo (se logueó con Google de una), le creamos su Agencia de prueba
-            nueva_agencia = Agencia(nombre=f"Agencia de {nombre or 'Nuevo Usuario'}")
+            nueva_agencia = Agencia(
+                nombre=f"Agencia de {nombre.strip() or email_norm.split('@')[0]}",
+                whatsapp_phone_number_id=f"oauth_{secrets.token_hex(12)}",
+                estado_pago="activo",
+            )
             db.add(nueva_agencia)
-            db.commit()
-            db.refresh(nueva_agencia)
-            
-            # Registramos el nuevo usuario asignado a esa agencia
+            db.flush()
+
             usuario = Usuario(
-                email=email,
-                nombre=nombre or email.split("@")[0],
+                email=email_norm,
+                password_hash=hash_password(secrets.token_urlsafe(32)),
+                nombre=(nombre.strip() or email_norm.split("@")[0])[:100],
+                telefono_whatsapp=f"sin-oauth-{secrets.token_hex(4)}",
+                email_verificado=True,
                 agencia_id=nueva_agencia.id,
-                telefono="",
-                activo=True
+                activo=True,
             )
             db.add(usuario)
             db.commit()
             db.refresh(usuario)
-        
-        # 2. Generar el token de sesión idéntico al tuyo tradicional
+        elif not usuario.email_verificado:
+            usuario.email_verificado = True
+            db.commit()
+
         sesion = crear_token_sesion(usuario.id, usuario.agencia_id)
-        
-        # 3. Redirigir directo al dashboard fucsia de su sucursal
         resp = RedirectResponse(url=f"/dashboard/{usuario.agencia_id}", status_code=303)
         resp.set_cookie(COOKIE_SESION, sesion, **_COOKIE_OPTS)
         return resp
-        
+
     except Exception as e:
-        print(f"Error en callback Supabase: {str(e)}")
-        return RedirectResponse(url=f"/auth/login?error=Error interno al procesar el acceso con Google.", status_code=303)
+        print(f"Error en callback Supabase: {e}")
+        return RedirectResponse(
+            url="/auth/login?error=Error interno al procesar el acceso con Google.",
+            status_code=303,
+        )
     finally:
         db.close()

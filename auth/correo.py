@@ -9,7 +9,11 @@ load_dotenv()
 
 
 def _base_url() -> str:
-    return os.getenv("DASHBOARD_BASE_URL", "http://127.0.0.1:8080").rstrip("/")
+    for nombre in ("DASHBOARD_BASE_URL", "APP_URL", "FRONTEND_URL"):
+        valor = os.getenv(nombre, "").strip().rstrip("/")
+        if valor:
+            return valor
+    return "http://127.0.0.1:8080"
 
 
 def enviar_correo_verificacion(destino: str, token: str, nombre: str) -> bool:

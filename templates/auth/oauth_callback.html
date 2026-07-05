@@ -1,0 +1,62 @@
+{% extends "auth/base.html" %}
+{% block title %}Completando acceso{% endblock %}
+{% block content %}
+<div class="ui-card p-6 text-center">
+  <h1 class="text-lg font-semibold" style="color: var(--title);">Completando acceso con Google</h1>
+  <p id="estado" class="mt-2 text-sm" style="color: var(--muted);">Un momento…</p>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+(function () {
+  const SUPABASE_URL = {{ supabase_url|tojson }};
+  const SUPABASE_ANON_KEY = {{ supabase_anon_key|tojson }};
+  const estado = document.getElementById('estado');
+  const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  function irLogin(mensaje) {
+    estado.textContent = mensaje;
+    setTimeout(function () {
+      window.location.href = '/auth/login?error=' + encodeURIComponent(mensaje);
+    }, 1200);
+  }
+
+  async function finalizar() {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const code = params.get('code');
+      if (code) {
+        const { error } = await supabaseClient.auth.exchangeCodeForSession(code);
+        if (error) throw error;
+      }
+
+      const { data, error: sessionError } = await supabaseClient.auth.getSession();
+      if (sessionError) throw sessionError;
+
+      const user = data.session && data.session.user;
+      if (!user || !user.email) {
+        irLogin('No se pudo obtener tu correo de Google.');
+        return;
+      }
+
+      const nombre =
+        (user.user_metadata && (user.user_metadata.full_name || user.user_metadata.name)) ||
+        user.email.split('@')[0];
+
+      const destino =
+        '/auth/supabase-callback?email=' +
+        encodeURIComponent(user.email) +
+        '&nombre=' +
+        encodeURIComponent(nombre);
+
+      window.location.replace(destino);
+    } catch (err) {
+      irLogin('Error al completar el acceso con Google.');
+      console.error(err);
+    }
+  }
+
+  finalizar();
+})();
+</script>
+{% endblock %}
