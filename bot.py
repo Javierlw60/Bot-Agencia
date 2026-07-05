@@ -667,6 +667,88 @@ def _capturar_nombre_cliente(
     return _procesar_mensaje(sesion, agencia, mensaje_gemini)
 
 
+def _capturar_nombre_desde_mensaje_whatsapp(
+    sesion: SesionCliente,
+    agencia: Agencia,
+    texto: str,
+    *,
+    etiqueta_cliente: str | None = None,
+) -> str:
+    """Un turno de captura de nombre para webhook (sin input())."""
+    bloqueo = _respuesta_si_agencia_bloqueada(sesion.agencia_id)
+    if bloqueo:
+        sesion.historial.append(f"Cliente: {texto.strip()}")
+        _persistir_mensaje(sesion, "cliente", etiqueta_cliente or texto.strip())
+        sesion.historial.append(f"Bot: {bloqueo}")
+        _persistir_mensaje(sesion, "bot", bloqueo)
+        _entregar_respuesta_whatsapp(
+            agencia, sesion.telefono, bloqueo, via_whatsapp=True, sesion=sesion
+        )
+        return bloqueo
+
+    ultimo_mensaje = texto.strip()
+    if not ultimo_mensaje:
+        respuesta = _responder_captura_nombre(agencia, PresentacionCliente())
+        sesion.historial.append(f"Bot: {respuesta}")
+        _persistir_mensaje(sesion, "bot", respuesta)
+        _entregar_respuesta_whatsapp(
+            agencia, sesion.telefono, respuesta, via_whatsapp=True, sesion=sesion
+        )
+        return respuesta
+
+    presentacion = _interpretar_presentacion(ultimo_mensaje)
+    if presentacion.nombre_valido:
+        sesion.nombre_cliente = presentacion.nombre
+        sesion.apellido_cliente = presentacion.apellido
+        mensaje_gemini = _mensaje_transicion_gemini(presentacion, ultimo_mensaje)
+        return _procesar_mensaje(
+            sesion,
+            agencia,
+            mensaje_gemini,
+            via_whatsapp=True,
+            etiqueta_cliente=etiqueta_cliente or ultimo_mensaje,
+        )
+
+    sesion.historial.append(f"Cliente: {ultimo_mensaje}")
+    _persistir_mensaje(sesion, "cliente", etiqueta_cliente or ultimo_mensaje)
+    if presentacion.tiene_consulta_comercial:
+        respuesta = _responder_captura_nombre(agencia, presentacion)
+    elif _es_entrada_nombre_invalida(ultimo_mensaje):
+        respuesta = _MENSAJE_PEDIR_NOMBRE_REAL
+    else:
+        respuesta = _responder_captura_nombre(agencia, presentacion)
+    sesion.historial.append(f"Bot: {respuesta}")
+    _persistir_mensaje(sesion, "bot", respuesta)
+    _entregar_respuesta_whatsapp(
+        agencia, sesion.telefono, respuesta, via_whatsapp=True, sesion=sesion
+    )
+    return respuesta
+
+
+def _atender_mensaje_whatsapp(
+    sesion: SesionCliente,
+    agencia: Agencia,
+    texto: str,
+    *,
+    etiqueta_cliente: str | None = None,
+) -> str:
+    """Captura nombre si falta; si ya hay nombre, delega en _procesar_mensaje sin modificarlo."""
+    if sesion.nombre_cliente:
+        return _procesar_mensaje(
+            sesion,
+            agencia,
+            texto,
+            via_whatsapp=True,
+            etiqueta_cliente=etiqueta_cliente,
+        )
+    return _capturar_nombre_desde_mensaje_whatsapp(
+        sesion,
+        agencia,
+        texto,
+        etiqueta_cliente=etiqueta_cliente,
+    )
+
+
 def _get_gemini_client() -> genai.Client:
     global _gemini_client
     if _gemini_client is None:

@@ -8,7 +8,12 @@ from auditoria_audio import (
     eliminar_archivo_temporal,
     registrar_interaccion_audio,
 )
-from bot import SesionCliente, _enviar_bienvenida_inicial, _finalizar_y_guardar_lead, _procesar_mensaje
+from bot import (
+    SesionCliente,
+    _atender_mensaje_whatsapp,
+    _enviar_bienvenida_inicial,
+    _finalizar_y_guardar_lead,
+)
 from models.database import Agencia, Sucursal, Vendedor
 from sesiones_bot import obtener_o_crear_sesion
 from whatsapp import descargar_media_whatsapp, enviar_respuesta_bot
@@ -63,7 +68,7 @@ def procesar_texto_whatsapp(
         sesion, sucursal, vendedor, phone_number_id_meta=phone_number_id_meta
     )
     _enviar_bienvenida_inicial(sesion, agencia, via_whatsapp=True)
-    respuesta = _procesar_mensaje(sesion, agencia, texto, via_whatsapp=True)
+    respuesta = _atender_mensaje_whatsapp(sesion, agencia, texto)
     _finalizar_y_guardar_lead(sesion)
     return respuesta
 
@@ -118,11 +123,10 @@ def procesar_audio_whatsapp(
         resultado["auditoria_id"] = auditoria_id
 
         _enviar_bienvenida_inicial(sesion, agencia, via_whatsapp=True)
-        respuesta = _procesar_mensaje(
+        respuesta = _atender_mensaje_whatsapp(
             sesion,
             agencia,
             transcripcion,
-            via_whatsapp=True,
             etiqueta_cliente=f"[Audio transcrito] {transcripcion}",
         )
         _finalizar_y_guardar_lead(sesion)
