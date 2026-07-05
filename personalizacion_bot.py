@@ -57,12 +57,13 @@ def obtener_nombre_bot(
     sucursal: Sucursal | None = None,
     vendedor: Vendedor | None = None,
 ) -> str:
-    for fuente in (vendedor, sucursal):
-        valor = _valor(fuente, "asesor_virtual_nombre")
+    """Identidad visible del bot: sucursal → agencia → vendedor (fallback)."""
+    for fuente in (sucursal, agencia, vendedor):
+        attr = "asesor_virtual_nombre" if fuente is not agencia else "nombre_bot"
+        valor = _valor(fuente, attr)
         if valor:
             return valor
-    valor = _valor(agencia, "nombre_bot")
-    return valor or NOMBRE_BOT_DEFAULT
+    return NOMBRE_BOT_DEFAULT
 
 
 def obtener_nombre_agencia_bot(
@@ -70,15 +71,27 @@ def obtener_nombre_agencia_bot(
     sucursal: Sucursal | None = None,
     vendedor: Vendedor | None = None,
 ) -> str:
-    for fuente in (vendedor, sucursal):
+    """Nombre comercial que dice el bot: sucursal → agencia → vendedor (fallback)."""
+    for fuente in (sucursal, vendedor):
         valor = _valor(fuente, "nombre_comercial")
         if valor:
             return valor
-    valor = (
-        _valor(agencia, "nombre_agencia")
-        or _valor(agencia, "nombre")
-    )
+    valor = _valor(agencia, "nombre_agencia") or _valor(agencia, "nombre")
     return valor or NOMBRE_AGENCIA_DEFAULT
+
+
+def obtener_direccion_bot(
+    agencia: Agencia,
+    sucursal: Sucursal | None = None,
+) -> str | None:
+    """Dirección oficial para visitas: sucursal de contacto → agencia."""
+    valor = _valor(sucursal, "direccion") or _valor(agencia, "direccion")
+    return valor or None
+
+
+def obtener_telefono_contacto_bot(agencia: Agencia) -> str | None:
+    valor = _valor(agencia, "telefono_contacto")
+    return valor or None
 
 
 def obtener_logo_bot(

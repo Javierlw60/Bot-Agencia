@@ -40,8 +40,10 @@ from permuta import (
 )
 from personalizacion_bot import (
     mensaje_bienvenida_agencia,
+    obtener_direccion_bot,
     obtener_nombre_agencia_bot,
     obtener_sucursal,
+    obtener_telefono_contacto_bot,
     obtener_vendedor,
 )
 from prompts import generar_prompt_maestro
@@ -888,6 +890,22 @@ def _construir_directiva_vendedor(agencia: Agencia, sesion: SesionCliente) -> st
         contexto_usado = f"\nDATOS DEL USADO YA MENCIONADOS: {resumen_usado_sesion(sesion)}"
     contexto_fotos = ""
     contexto_sucursal = ""
+    sucursal = _sucursal_sesion_bot(sesion)
+    direccion = obtener_direccion_bot(agencia, sucursal)
+    telefono_contacto = obtener_telefono_contacto_bot(agencia)
+    contexto_ubicacion = ""
+    if direccion or telefono_contacto:
+        partes: list[str] = []
+        if direccion:
+            partes.append(f"Dirección oficial para visitas: {direccion}.")
+        if telefono_contacto:
+            partes.append(f"Teléfono de contacto de la agencia: {telefono_contacto}.")
+        contexto_ubicacion = (
+            "\nDATOS OFICIALES DE UBICACIÓN (OBLIGATORIO): "
+            + " ".join(partes)
+            + " Usá EXACTAMENTE estos datos al confirmar visitas o dar indicaciones. "
+            "NUNCA inventes, modifiques ni supongas otra dirección o teléfono."
+        )
     if sesion.sucursal_origen_id:
         nombre_suc = obtener_nombre_sucursal(sesion.agencia_id, sesion.sucursal_origen_id)
         contexto_sucursal = (
@@ -895,6 +913,8 @@ def _construir_directiva_vendedor(agencia: Agencia, sesion: SesionCliente) -> st
             "Al agendar una visita, proponé esa sede por defecto. Si elige un auto que está "
             "en otra sucursal, ofrecé también coordinar turno en la sede donde está el vehículo."
         )
+        if direccion:
+            contexto_sucursal += f" La dirección de esa sede es: {direccion}."
     if sesion.auto_interes_id:
         auto = obtener_auto_por_id(sesion.agencia_id, sesion.auto_interes_id)
         if auto:
@@ -909,7 +929,7 @@ def _construir_directiva_vendedor(agencia: Agencia, sesion: SesionCliente) -> st
                 )
     return (
         f"{agencia.prompt_personalizado or ''}\n"
-        f"{contexto_cliente}{contexto_sucursal}{contexto_usado}{contexto_fotos}\n"
+        f"{contexto_cliente}{contexto_ubicacion}{contexto_sucursal}{contexto_usado}{contexto_fotos}\n"
         f"{INSTRUCCIONES_PERMUTA}\n"
         "PERSONALIDAD CRÍTICA: Actuá como un vendedor de autos usados argentino, rápido, ágil, "
         "canchero y con mucha calle. Si el cliente te da una señal de compra clara (ej: 'tengo la plata'), "

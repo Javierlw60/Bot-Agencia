@@ -1046,7 +1046,8 @@ def _contexto_configuracion(db, request: Request, agencia: Agencia, sucursal_id:
             "sucursal_activa": sucursal_activa,
             "vendedores": vendedores,
             "vendedor_activo": vendedor_activo,
-            "vendedor_sin_linea": _vendedor_sin_linea(vendedor_activo),
+            "vendedor_sin_linea": _vendedor_sin_linea(vendedor_activo)
+            and not _agencia_tiene_linea_bot(agencia),
             "nombre_comercial_actual": obtener_nombre_agencia_bot(
                 agencia, sucursal_activa, vendedor_activo
             ),
@@ -1869,6 +1870,64 @@ async def guardar_configuracion(
         db.close()
 
 
+@router.post("/{agencia_id}/configuracion/agencia")
+async def guardar_configuracion_agencia(
+    agencia_id: int,
+    nombre_agencia: str = Form(...),
+    direccion_agencia: str = Form(""),
+    whatsapp_phone_number_id: str = Form(...),
+    telefono_contacto: str = Form(""),
+    nombre_bot: str = Form(""),
+    sucursal_id: int = Form(...),
+):
+    """Guarda datos centrales de la agencia: línea del bot, dirección y contacto."""
+    db = SessionLocal()
+    try:
+        agencia = _obtener_agencia(db, agencia_id)
+        linea_bot = _normalizar_telefono(whatsapp_phone_number_id)
+        if not linea_bot:
+            raise HTTPException(status_code=400, detail="El Phone Number ID del bot es obligatorio")
+
+        otra = (
+            db.query(Agencia)
+            .filter(
+                Agencia.id != agencia_id,
+                Agencia.whatsapp_phone_number_id == linea_bot,
+            )
+            .first()
+        )
+        if otra:
+            return RedirectResponse(
+                url=f"/dashboard/{agencia_id}/configuracion?error=linea_bot_duplicada",
+                status_code=303,
+            )
+
+        _liberar_linea_bot_en_equipo(db, agencia_id, linea_bot)
+
+        agencia.nombre_agencia = nombre_agencia.strip() or agencia.nombre
+        agencia.direccion = direccion_agencia.strip() or None
+        agencia.whatsapp_phone_number_id = linea_bot
+        agencia.telefono_contacto = telefono_contacto.strip() or None
+        agencia.nombre_bot = nombre_bot.strip() or None
+
+        sucursal_principal = _resolver_sucursal_activa(db, agencia_id)
+        if sucursal_principal:
+            if agencia.direccion:
+                sucursal_principal.direccion = agencia.direccion
+            if not sucursal_principal.nombre_comercial:
+                sucursal_principal.nombre_comercial = agencia.nombre_agencia
+            if not sucursal_principal.asesor_virtual_nombre and agencia.nombre_bot:
+                sucursal_principal.asesor_virtual_nombre = agencia.nombre_bot
+
+        db.commit()
+        return RedirectResponse(
+            url=f"/dashboard/{agencia_id}/configuracion?sucursal={sucursal_id}&ok=agencia",
+            status_code=303,
+        )
+    finally:
+        db.close()
+
+
 @router.post("/{agencia_id}/configuracion/sucursales")
 async def crear_sucursal(agencia_id: int):
     db = SessionLocal()
@@ -1923,7 +1982,32 @@ def _telefono_en_uso(db, agencia_id: int, telefono: str, excluir_id: int | None)
     q = db.query(Vendedor).filter(Vendedor.telefono_whatsapp == telefono)
     if excluir_id:
         q = q.filter(Vendedor.id != excluir_id)
-    return db.query(q.exists()).scalar()
+    if db.query(q.exists()).scalar():
+        return True
+    agencia = db.query(Agencia).filter(Agencia.id == agencia_id).first()
+    if agencia and _normalizar_telefono(agencia.whatsapp_phone_number_id) == _normalizar_telefono(
+        telefono
+    ):
+        return True
+    return False
+
+
+def _liberar_linea_bot_en_equipo(db, agencia_id: int, linea: str) -> None:
+    """Quita la línea del bot de vendedores/sucursales que la tenían duplicada."""
+    norm = _normalizar_telefono(linea)
+    if not norm:
+        return
+    for vend in db.query(Vendedor).filter(Vendedor.agencia_id == agencia_id).all():
+        if _normalizar_telefono(vend.telefono_whatsapp) == norm:
+            vend.telefono_whatsapp = f"sin-linea-{vend.id}"
+    for suc in db.query(Sucursal).filter(Sucursal.agencia_id == agencia_id).all():
+        if _normalizar_telefono(suc.telefono_whatsapp) == norm:
+            suc.telefono_whatsapp = ""
+
+
+def _agencia_tiene_linea_bot(agencia: Agencia) -> bool:
+    linea = (agencia.whatsapp_phone_number_id or "").strip()
+    return bool(linea) and not linea.startswith("reg_") and not linea.startswith("sin-linea")
 
 
 @router.post("/{agencia_id}/configuracion/vendedores")

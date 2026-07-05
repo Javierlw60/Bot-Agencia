@@ -74,6 +74,8 @@
 {% set _err = request.query_params.get('error') %}
 {% if _ok == 'guardado' %}
 <div class="ui-card mb-3 px-4 py-2.5 text-sm" style="color: #6ee7b7;">Cambios guardados correctamente.</div>
+{% elif _ok == 'agencia' %}
+<div class="ui-card mb-3 px-4 py-2.5 text-sm" style="color: #6ee7b7;">Datos de la agencia guardados. Si moviste la línea del bot, revisá que el vendedor tenga su celular personal aparte.</div>
 {% elif _ok == 'sucursal' %}
 <div class="ui-card mb-3 px-4 py-2.5 text-sm" style="color: #6ee7b7;">Nueva sucursal creada.</div>
 {% elif _ok == 'vendedor' %}
@@ -82,6 +84,8 @@
 <div class="ui-card mb-3 px-4 py-2.5 text-sm" style="color: #6ee7b7;">Vendedor eliminado.</div>
 {% elif _err == 'telefono_duplicado' %}
 <div class="ui-card mb-3 px-4 py-2.5 text-sm" style="color: #fca5a5;">Ese teléfono ya está en uso por otro vendedor. Los números no se pueden repetir.</div>
+{% elif _err == 'linea_bot_duplicada' %}
+<div class="ui-card mb-3 px-4 py-2.5 text-sm" style="color: #fca5a5;">Ese Phone Number ID ya está en uso por otra agencia.</div>
 {% elif _err == 'ultimo_vendedor' %}
 <div class="ui-card mb-3 px-4 py-2.5 text-sm" style="color: #fca5a5;">No podés eliminar el único vendedor de la sucursal.</div>
 {% endif %}
@@ -92,8 +96,7 @@
   <div>
     <p class="text-sm font-semibold" style="color: var(--title);">Configurá el Vendedor Principal</p>
     <p class="mt-0.5 text-sm" style="color: var(--muted);">
-      Esta sucursal necesita al menos un vendedor con teléfono de WhatsApp para que el bot responda correctamente.
-      Completá la línea del <strong style="color: var(--title);">{{ vendedor_activo.nombre }}</strong> abajo.
+      Completá el celular personal del <strong style="color: var(--title);">{{ vendedor_activo.nombre }}</strong> (distinto del Phone Number ID del bot en «Datos de la agencia»).
     </p>
   </div>
   <a href="#form-configuracion"
@@ -103,6 +106,52 @@
   </a>
 </div>
 {% endif %}
+
+<form method="post" action="/dashboard/{{ agencia.id }}/configuracion/agencia" class="ui-card mb-3 flex flex-col gap-3 p-4 sm:p-5" novalidate>
+  <input type="hidden" name="sucursal_id" value="{{ sucursal_activa.id }}">
+  <div>
+    <h2 class="text-base font-semibold" style="color: var(--title);">Datos de la agencia</h2>
+    <p class="mt-0.5 text-sm" style="color: var(--muted);">
+      Línea oficial del bot, dirección y contacto. El bot lee estos datos en tiempo real; si los cambiás acá, responde con la info nueva sin tocar código.
+    </p>
+  </div>
+  <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+    <label class="block sm:col-span-2">
+      <span class="ui-label">Nombre comercial de la agencia</span>
+      <input name="nombre_agencia" required
+             value="{{ agencia.nombre_agencia or agencia.nombre or '' }}"
+             placeholder="Ej: Agencia Mitre 1" class="ui-input">
+    </label>
+    <label class="block sm:col-span-2">
+      <span class="ui-label">Dirección de la agencia</span>
+      <input name="direccion_agencia" value="{{ agencia.direccion or sucursal_activa.direccion or '' }}"
+             placeholder="Ej: Roma 751" class="ui-input">
+    </label>
+    <label class="block">
+      <span class="ui-label">Phone Number ID de WhatsApp (línea del bot) *</span>
+      <input name="whatsapp_phone_number_id" required inputmode="numeric"
+             value="{{ agencia.whatsapp_phone_number_id or '' }}"
+             placeholder="Ej: 1157912357408413" class="ui-input">
+    </label>
+    <label class="block">
+      <span class="ui-label">Teléfono de contacto de la agencia</span>
+      <input name="telefono_contacto" inputmode="tel"
+             value="{{ agencia.telefono_contacto or '' }}"
+             placeholder="Ej: 11 4567-8900" class="ui-input">
+    </label>
+    <label class="block sm:col-span-2">
+      <span class="ui-label">Asesor virtual (nombre del bot)</span>
+      <input name="nombre_bot" maxlength="80"
+             value="{{ agencia.nombre_bot or '' }}"
+             placeholder="{{ nombre_bot_default }}" class="ui-input">
+    </label>
+  </div>
+  <p class="-mt-1 text-xs" style="color: var(--muted);">
+    El Phone Number ID es el que Meta asigna a la línea de WhatsApp Business de la agencia (no el celular humano del vendedor).
+    Si movés acá un número que estaba en un vendedor, se libera automáticamente de ese vendedor.
+  </p>
+  <button type="submit" class="btn-primary mt-1 w-full py-2.5 sm:w-auto sm:self-start sm:px-6">Guardar agencia</button>
+</form>
 
 <section class="ui-card mb-3 overflow-hidden">
   <div class="sucursales-section-head px-4 py-3 sm:px-5">
@@ -161,7 +210,7 @@
       <div>
         <h2 class="text-base font-semibold" style="color: var(--title);">Equipo de Ventas</h2>
         <p class="mt-0.5 text-sm" style="color: color-mix(in srgb, var(--title) 72%, var(--muted));">
-          Vendedores de <strong style="color: var(--title);">{{ sucursal_activa.nombre }}</strong> · cada uno con su línea de WhatsApp e identidad propia.
+          Vendedores de <strong style="color: var(--title);">{{ sucursal_activa.nombre }}</strong> · celular personal de cada uno (el bot usa la línea de la agencia arriba).
         </p>
       </div>
       <form method="post" action="/dashboard/{{ agencia.id }}/configuracion/vendedores">
@@ -252,13 +301,13 @@
                placeholder="Ej: Juan Pérez" class="ui-input">
       </label>
       <label class="block">
-        <span class="ui-label">Teléfono de WhatsApp del vendedor *</span>
+        <span class="ui-label">Celular personal del vendedor *</span>
         <input name="telefono_whatsapp" required inputmode="tel" value="{{ _tel_v }}"
-               placeholder="Ej: 5491163052331 (línea exclusiva)" class="ui-input">
+               placeholder="Ej: 5491163052331 (no es la línea del bot)" class="ui-input">
       </label>
     </div>
     <p class="-mt-1 text-xs" style="color: var(--muted);">
-      Línea única del vendedor. Los mensajes que lleguen a este número responden con su identidad. No se puede repetir entre vendedores.
+      Celular del vendedor para contacto interno. El bot responde por el Phone Number ID de la agencia (sección «Datos de la agencia»). No repetir ese ID acá.
     </p>
 
     <div class="border-t pt-3" style="border-color: var(--border);">

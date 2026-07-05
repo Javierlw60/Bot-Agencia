@@ -78,9 +78,9 @@ def resolver_destino_por_receptor_whatsapp(
     Identifica AGENCIA > SUCURSAL > VENDEDOR según la línea receptora.
 
     Prioridad de ruteo:
-      1. Vendedor cuya línea (telefono_whatsapp) coincide → su sucursal y agencia.
-      2. Sucursal cuya línea coincide → su vendedor principal.
-      3. Agencia por whatsapp_phone_number_id → sucursal principal → vendedor principal.
+      1. Agencia por whatsapp_phone_number_id (línea oficial del bot) → sucursal principal → vendedor principal.
+      2. Vendedor cuya línea (telefono_whatsapp) coincide → su sucursal y agencia.
+      3. Sucursal cuya línea coincide → su vendedor principal.
 
     Los teléfonos de vendedor son únicos, así que nunca se mezclan entre sucursales.
     """
@@ -88,12 +88,37 @@ def resolver_destino_por_receptor_whatsapp(
     try:
         normalizado = _normalizar_linea_whatsapp(phone_number_id)
 
-        # 1) Coincidencia directa por línea de vendedor.
+        def _coincide_linea(valor: str) -> bool:
+            if not valor:
+                return False
+            return valor == phone_number_id or (
+                bool(normalizado) and _normalizar_linea_whatsapp(valor) == normalizado
+            )
+
+        def _destino_agencia(agencia: Agencia) -> tuple[Agencia, Sucursal | None, Vendedor | None]:
+            suc = (
+                db.query(Sucursal)
+                .filter(Sucursal.agencia_id == agencia.id, Sucursal.es_principal.is_(True))
+                .order_by(Sucursal.numero)
+                .first()
+            )
+            if not suc:
+                suc = (
+                    db.query(Sucursal)
+                    .filter(Sucursal.agencia_id == agencia.id)
+                    .order_by(Sucursal.numero)
+                    .first()
+                )
+            return agencia, suc, _vendedor_principal_de_sucursal(db, suc) if suc else None
+
+        # 1) Línea oficial del bot a nivel agencia.
+        for agencia in db.query(Agencia).all():
+            if _coincide_linea(agencia.whatsapp_phone_number_id or ""):
+                return _destino_agencia(agencia)
+
+        # 2) Coincidencia directa por línea de vendedor.
         for vend in db.query(Vendedor).filter(Vendedor.activo.is_(True)).all():
-            tel = vend.telefono_whatsapp or ""
-            if tel == phone_number_id or (
-                normalizado and _normalizar_linea_whatsapp(tel) == normalizado
-            ):
+            if _coincide_linea(vend.telefono_whatsapp or ""):
                 sucursal = (
                     db.query(Sucursal).filter(Sucursal.id == vend.sucursal_id).first()
                 )
@@ -102,38 +127,13 @@ def resolver_destino_por_receptor_whatsapp(
                 )
                 return agencia, sucursal, vend
 
-        # 2) Coincidencia por línea de sucursal (legacy) → vendedor principal.
+        # 3) Coincidencia por línea de sucursal (legacy) → vendedor principal.
         for suc in db.query(Sucursal).all():
-            tel = suc.telefono_whatsapp or ""
-            if tel == phone_number_id or (
-                normalizado and _normalizar_linea_whatsapp(tel) == normalizado
-            ):
+            if _coincide_linea(suc.telefono_whatsapp or ""):
                 agencia = db.query(Agencia).filter(Agencia.id == suc.agencia_id).first()
                 return agencia, suc, _vendedor_principal_de_sucursal(db, suc)
 
-        # 3) Fallback por agencia.
-        agencia = (
-            db.query(Agencia)
-            .filter(Agencia.whatsapp_phone_number_id == phone_number_id)
-            .first()
-        )
-        if not agencia:
-            return None, None, None
-
-        suc = (
-            db.query(Sucursal)
-            .filter(Sucursal.agencia_id == agencia.id, Sucursal.es_principal.is_(True))
-            .order_by(Sucursal.numero)
-            .first()
-        )
-        if not suc:
-            suc = (
-                db.query(Sucursal)
-                .filter(Sucursal.agencia_id == agencia.id)
-                .order_by(Sucursal.numero)
-                .first()
-            )
-        return agencia, suc, _vendedor_principal_de_sucursal(db, suc)
+        return None, None, None
     finally:
         db.close()
 
