@@ -1,3 +1,5 @@
+import logging
+logger = logging.getLogger("bot")
 import datetime
 import os
 import re
@@ -947,6 +949,7 @@ def _procesar_mensaje(
             "Cuando la tengas, reiniciá el bot."
         )
     except genai_errors.ClientError as e:
+        logger.error("[GEMINI ClientError] %s", e, exc_info=True)
         if sesion.cuota_diaria_agotada or _es_cuota_diaria_agotada(e):
             respuesta_bot = (
                 "Llegamos al límite diario de consultas con la IA. "
@@ -959,7 +962,8 @@ def _procesar_mensaje(
             )
         else:
             respuesta_bot = "Che, se me cortó la señal en el playón. ¿Me repetís lo último?"
-    except Exception:
+    except Exception as e:
+        logger.error("[GEMINI Exception] %s", e, exc_info=True)
         respuesta_bot = "Che, se me cortó la señal en el playón. ¿Me repetís lo último?"
 
     sesion.historial.append(f"Bot: {respuesta_bot}")
