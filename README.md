@@ -66,6 +66,21 @@ En Render el disco del servicio es **efímero**: un redeploy borra SQLite local 
 
 Sin `DATABASE_URL`, en local se usa SQLite (`bot_agencias_multitenant.db`).
 
+### Correo de verificación (registro)
+
+Sin estas variables el enlace **solo aparece en los logs** de Render.
+
+| Variable | Descripción |
+|----------|-------------|
+| `SMTP_HOST` | Servidor SMTP (ej. `smtp.gmail.com`) |
+| `SMTP_PORT` | `587` (STARTTLS) o `465` (SSL) |
+| `SMTP_USER` / `SMTP_PASSWORD` | Credenciales SMTP |
+| `SMTP_FROM` | Remitente (ej. `noreply@bot-agencias.com.ar`) |
+| `RESEND_API_KEY` | Alternativa vía Resend |
+| `SENDGRID_API_KEY` | Alternativa vía SendGrid |
+
+Prioridad: Resend → SendGrid → SMTP.
+
 ### WhatsApp Cloud API (producción)
 
 | Variable | Descripción |
@@ -83,7 +98,7 @@ Alias aceptados: `WHATSAPP_TOKEN`, `PHONE_NUMBER_ID`, `VERIFY_TOKEN`.
 - **Recordatorios:** `RECORDATORIOS_ACTIVOS`, `RECORDATORIOS_INTERVALO_MIN`
 - **Voz:** `TTS_VOZ`, `TTS_MAX_CARACTERES`, `OPENAI_API_KEY`, `STT_MOTOR`, `STT_IDIOMA`
 - **Mercado Pago:** `MERCADOPAGO_ACCESS_TOKEN`, `MERCADOPAGO_USER_ID`, etc.
-- **SMTP:** `SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD` (si no hay SMTP, los enlaces de verificación se imprimen en consola)
+- **Correo de verificación:** `SMTP_HOST` / `SMTP_USER` / `SMTP_PASSWORD` / `SMTP_PORT`, o `RESEND_API_KEY`, o `SENDGRID_API_KEY`. Sin ninguno, el enlace solo se imprime en logs.
 
 Consultá `.env.example` para la lista completa y comentarios de cada variable.
 
