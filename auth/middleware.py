@@ -18,6 +18,7 @@ _PREFIJOS_PUBLICOS = (
     "/webhook",
     "/api/mercadopago",
     "/api/bot",
+    "/admin",
     "/docs",
     "/openapi.json",
     "/redoc",

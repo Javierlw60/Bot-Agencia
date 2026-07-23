@@ -15,6 +15,7 @@ from fastapi.templating import Jinja2Templates
 from api_bot import router as bot_router
 from api_mercadopago import router as mercadopago_router
 from api_whatsapp import router as whatsapp_router
+from admin_reset import router as admin_router
 from auth.middleware import MiddlewareAutenticacion
 from auth.routes import router as auth_router
 from dashboard.middleware_sucursal import MiddlewareSucursalActiva
@@ -71,6 +72,7 @@ app.include_router(dashboard_router)
 app.include_router(bot_router)
 app.include_router(mercadopago_router)
 app.include_router(whatsapp_router)
+app.include_router(admin_router)
 
 
 @app.get("/")

@@ -237,13 +237,62 @@ def migrar_lineas_bot_desde_equipo() -> int:
         db.close()
 
 
+def _agencia_con_email_verificado(db, agencia_id: int) -> bool:
+    from models.database import Usuario
+
+    return (
+        db.query(Usuario)
+        .filter(
+            Usuario.agencia_id == agencia_id,
+            Usuario.email_verificado.is_(True),
+            Usuario.activo.is_(True),
+        )
+        .first()
+        is not None
+    )
+
+
+def _elegir_agencia_placeholder(db, placeholders: list[Agencia]) -> Agencia | None:
+    """Prioriza agencias con al menos un usuario de email verificado."""
+    if not placeholders:
+        return None
+    verificadas = [a for a in placeholders if _agencia_con_email_verificado(db, a.id)]
+    if verificadas:
+        return verificadas[0]
+    # Sin cuentas verificadas: no adivinar (evita dar la línea a registros a medias).
+    print(
+        "[WEBHOOK WA] Hay agencias con reg_… pero ninguna con email verificado. "
+        "No se auto-asigna el Phone Number ID."
+    )
+    return None
+
+
+def _liberar_linea_en_agencias_sin_verificar(db, phone_number_id: str) -> None:
+    """Si una agencia sin email verificado se quedó con el ID de Meta, lo libera."""
+    import secrets
+
+    buscado = _texto_linea(phone_number_id)
+    if not buscado:
+        return
+    for ag in db.query(Agencia).order_by(Agencia.id).all():
+        if not _lineas_whatsapp_coinciden(ag.whatsapp_phone_number_id, buscado):
+            continue
+        if _agencia_con_email_verificado(db, ag.id):
+            continue
+        nuevo = f"reg_{secrets.token_hex(8)}"
+        print(
+            f"[WEBHOOK WA] Liberando Phone Number ID {buscado!r} de agencia "
+            f"id={ag.id} ({ag.nombre!r}) sin email verificado → {nuevo}"
+        )
+        ag.whatsapp_phone_number_id = nuevo
+    db.commit()
+
+
 def _autofix_linea_bot_desde_env(db, phone_number_id: str) -> Agencia | None:
     """
     Si Meta manda un Phone Number ID que coincide con WHATSAPP_PHONE_NUMBER_ID
-    del .env y ninguna agencia lo tiene, se asigna a la agencia pendiente (reg_…).
-
-    Multi-tenant: si hay varias con reg_, se elige la de id más bajo (la primera
-    registrada) y se deja registro en logs. Una sola línea WA de plataforma.
+    del .env y ninguna agencia verificada lo tiene, se asigna a una agencia
+    pendiente (reg_…) con email verificado.
     """
     from whatsapp_config import whatsapp_phone_number_id
     from whatsapp_linea import es_phone_number_id_meta
@@ -257,40 +306,48 @@ def _autofix_linea_bot_desde_env(db, phone_number_id: str) -> Agencia | None:
     if not es_phone_number_id_meta(buscado):
         return None
 
+    # Si una agencia fantasma (sin verificar) se quedó con el ID, liberarlo.
+    _liberar_linea_en_agencias_sin_verificar(db, buscado)
+
     ya = _buscar_agencia_por_phone_id(db, buscado)
     if ya:
-        return ya
+        if _agencia_con_email_verificado(db, ya.id):
+            return ya
+        _liberar_linea_en_agencias_sin_verificar(db, buscado)
+        ya = _buscar_agencia_por_phone_id(db, buscado)
+        if ya:
+            return ya
 
     placeholders = [
         a
         for a in db.query(Agencia).order_by(Agencia.id).all()
         if _es_placeholder_linea_bot(a.whatsapp_phone_number_id)
     ]
-    if not placeholders:
-        print(
-            f"[WEBHOOK WA] .env={env_id!r} coincide con el webhook pero ninguna "
-            "agencia tiene línea pendiente (reg_…). Cargá el Phone Number ID en "
-            "Configuración → Datos de la agencia."
-        )
+    agencia = _elegir_agencia_placeholder(db, placeholders)
+    if not agencia:
+        if placeholders:
+            print(
+                f"[WEBHOOK WA] .env={env_id!r} coincide, pero no hay agencia "
+                "verificada para asignar la línea. Verificá el email o borrá "
+                "registros basura con /admin/reset-agencias."
+            )
+        else:
+            print(
+                f"[WEBHOOK WA] .env={env_id!r} coincide con el webhook pero ninguna "
+                "agencia tiene línea pendiente (reg_…). Cargá el Phone Number ID en "
+                "Configuración → Datos de la agencia."
+            )
         return None
 
-    agencia = placeholders[0]
-    if len(placeholders) > 1:
-        print(
-            f"[WEBHOOK WA] Hay {len(placeholders)} agencias con reg_…; "
-            f"se asigna la línea {buscado!r} a la más antigua "
-            f"id={agencia.id} ({agencia.nombre!r})."
-        )
-    else:
-        print(
-            f"[WEBHOOK WA] Auto-fix desde .env: se asigna Phone Number ID {buscado!r} "
-            f"a agencia id={agencia.id} ({agencia.nombre!r})."
-        )
+    print(
+        f"[WEBHOOK WA] Auto-fix desde .env: se asigna Phone Number ID {buscado!r} "
+        f"a agencia verificada id={agencia.id} ({agencia.nombre!r})."
+    )
     return _asignar_linea_bot_a_agencia(db, agencia, buscado)
 
 
 def migrar_linea_bot_desde_env() -> bool:
-    """Al arrancar: si .env tiene Phone Number ID y nadie lo tiene, asignarlo."""
+    """Al arrancar: libera ID de agencias sin verificar y asigna a una verificada."""
     from whatsapp_config import whatsapp_phone_number_id
     from whatsapp_linea import es_phone_number_id_meta
 
@@ -300,6 +357,7 @@ def migrar_linea_bot_desde_env() -> bool:
 
     db = SessionLocal()
     try:
+        _liberar_linea_en_agencias_sin_verificar(db, env_id)
         if _buscar_agencia_por_phone_id(db, env_id):
             return False
         placeholders = [
@@ -307,9 +365,9 @@ def migrar_linea_bot_desde_env() -> bool:
             for a in db.query(Agencia).order_by(Agencia.id).all()
             if _es_placeholder_linea_bot(a.whatsapp_phone_number_id)
         ]
-        if not placeholders:
+        agencia = _elegir_agencia_placeholder(db, placeholders)
+        if not agencia:
             return False
-        agencia = placeholders[0]
         _asignar_linea_bot_a_agencia(db, agencia, env_id)
         print(
             f"[DB] Línea del bot tomada de .env → agencia id={agencia.id} "
@@ -323,17 +381,20 @@ def migrar_linea_bot_desde_env() -> bool:
 def asegurar_linea_bot_para_agencia(db, agencia: Agencia) -> bool:
     """
     Al abrir Configuración: si esta agencia todavía tiene reg_… y el .env tiene
-    un Phone Number ID libre, se lo asigna a ESTA agencia (la que el usuario
-    está editando).
+    un Phone Number ID libre (o atrapado en una agencia sin verificar), se lo
+    asigna a ESTA agencia (la que el usuario está editando), solo si está verificada.
     """
     from whatsapp_config import whatsapp_phone_number_id
     from whatsapp_linea import es_phone_number_id_meta
 
+    if not _agencia_con_email_verificado(db, agencia.id):
+        return False
     if not _es_placeholder_linea_bot(agencia.whatsapp_phone_number_id):
         return False
     env_id = _texto_linea(whatsapp_phone_number_id())
     if not env_id or not es_phone_number_id_meta(env_id):
         return False
+    _liberar_linea_en_agencias_sin_verificar(db, env_id)
     otra = _buscar_agencia_por_phone_id(db, env_id)
     if otra and otra.id != agencia.id:
         return False
@@ -387,6 +448,16 @@ def resolver_destino_por_receptor_whatsapp(
     db = SessionLocal()
     try:
         agencia = _buscar_agencia_por_phone_id(db, buscado)
+        # Si el ID quedó en una agencia sin email verificado (registro a medias),
+        # liberarlo para poder asignarlo a una cuenta usable.
+        if agencia and not _agencia_con_email_verificado(db, agencia.id):
+            from whatsapp_config import whatsapp_phone_number_id
+
+            env_id = _texto_linea(whatsapp_phone_number_id())
+            if env_id and _lineas_whatsapp_coinciden(buscado, env_id):
+                _liberar_linea_en_agencias_sin_verificar(db, buscado)
+                agencia = _buscar_agencia_por_phone_id(db, buscado)
+
         if not agencia:
             agencia = _autofix_linea_bot_desde_equipo(db, buscado)
         if not agencia:
