@@ -1,6 +1,6 @@
 """Gestión de sesiones del bot para conversaciones por WhatsApp."""
 
-from models.database import MensajeConversacion, ProspectoLead, SessionLocal
+from models.database import Cita, MensajeConversacion, ProspectoLead, SessionLocal
 
 from bot import SesionCliente
 
@@ -36,6 +36,20 @@ def _hidratar_sesion_desde_bd(sesion: SesionCliente) -> None:
             sesion.usado_es_titular = lead.usado_es_titular
             if lead.usado_marca_modelo:
                 sesion.quiere_permuta = True
+            sesion.sucursal_origen_id = lead.sucursal_id
+            sesion.vendedor_origen_id = getattr(lead, "vendedor_id", None)
+
+            cita = (
+                db.query(Cita)
+                .filter(
+                    Cita.cliente_id == lead.id,
+                    Cita.estado.in_(("pendiente", "confirmada")),
+                )
+                .order_by(Cita.id.desc())
+                .first()
+            )
+            if cita:
+                sesion.cita_registrada_id = cita.id
 
         mensajes = (
             db.query(MensajeConversacion)

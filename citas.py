@@ -175,9 +175,10 @@ def _extraer_hora_explicita(texto_norm: str, *, solo_confirmacion: bool = False)
             return datetime.time(horas, minutos)
 
     if solo_confirmacion:
-        # En mensajes del bot, solo aceptar "te esperamos … a las …" / "quedamos a las"
+        # En mensajes del bot, solo aceptar confirmaciones de horario de cita.
         for match in re.finditer(
-            r"(?:te esperamos|quedamos|confirmad[oa]|cita)\b.{0,80}?"
+            r"(?:te esperamos|quedamos|quedo|qued[oó]|confirmad[oa]|cita|"
+            r"reprogram|cambiamos|pasamos|la dejamos|la dej[eé])\b.{0,100}?"
             r"(?:a las?|para las?)\s*(\d{1,2})(?::(\d{2}))?",
             texto_norm,
         ):
@@ -185,6 +186,16 @@ def _extraer_hora_explicita(texto_norm: str, *, solo_confirmacion: bool = False)
             minutos = int(match.group(2) or 0)
             if 0 <= horas <= 23 and 0 <= minutos <= 59:
                 return datetime.time(horas, minutos)
+        # También "a las 11" cerca de "te esperamos" sin orden estricto
+        if re.search(r"\b(te esperamos|quedamos|cita|reprogram|cambiamos)\b", texto_norm):
+            for match in re.finditer(
+                r"(?:a las?|para las?)\s*(\d{1,2})(?::(\d{2}))?",
+                texto_norm,
+            ):
+                horas = int(match.group(1))
+                minutos = int(match.group(2) or 0)
+                if 0 <= horas <= 23 and 0 <= minutos <= 59:
+                    return datetime.time(horas, minutos)
         return None
 
     # 2) HH:MM / N hs — pero NO franjas ni "N horas antes"
@@ -398,30 +409,145 @@ def actualizar_hora_cita(cita_id: int, fecha_cita: datetime.date, hora_cita: dat
         db.close()
 
 
+def _buscar_cita_activa_sesion(sesion) -> Cita | None:
+    """Busca la cita pendiente/confirmada del lead (o del teléfono) en BD."""
+    db = SessionLocal()
+    try:
+        lead_id = getattr(sesion, "lead_id", None)
+        if lead_id:
+            cita = (
+                db.query(Cita)
+                .filter(
+                    Cita.cliente_id == lead_id,
+                    Cita.estado.in_(("pendiente", "confirmada")),
+                )
+                .order_by(Cita.id.desc())
+                .first()
+            )
+            if cita:
+                # Evitar DetachedInstance al cerrar sesión.
+                db.expunge(cita)
+                return cita
+
+        lead = (
+            db.query(ProspectoLead)
+            .filter(
+                ProspectoLead.agencia_id == sesion.agencia_id,
+                ProspectoLead.telefono_cliente == sesion.telefono,
+            )
+            .order_by(ProspectoLead.id.desc())
+            .first()
+        )
+        if not lead:
+            return None
+        sesion.lead_id = lead.id
+        cita = (
+            db.query(Cita)
+            .filter(
+                Cita.cliente_id == lead.id,
+                Cita.estado.in_(("pendiente", "confirmada")),
+            )
+            .order_by(Cita.id.desc())
+            .first()
+        )
+        if cita:
+            db.expunge(cita)
+        return cita
+    finally:
+        db.close()
+
+
+def detectar_cambio_horario(texto: str) -> bool:
+    """True si el cliente pide cambiar/reprogramar o da una hora explícita."""
+    texto_norm = _normalizar(texto or "")
+    if _extraer_hora_explicita(texto_norm):
+        return True
+    return bool(
+        re.search(
+            r"\b("
+            r"cambi|reprogram|pasalo|pasala|pasame|mejor a|"
+            r"otra hora|otro horario|en vez de|en lugar de|"
+            r"antes a las|despues a las|después a las"
+            r")\b",
+            texto_norm,
+        )
+    )
+
+
+def _extraer_fecha_hora_para_actualizar(
+    texto: str,
+    historial: list[str] | None,
+    cita_actual: Cita | None,
+) -> tuple[datetime.date, datetime.time] | None:
+    """Como extraer_fecha_hora_cita, pero si falta fecha usa la de la cita existente."""
+    fecha_hora = extraer_fecha_hora_cita(texto, historial)
+    if fecha_hora:
+        return fecha_hora
+
+    hora = _obtener_hora_acordada(texto, historial)
+    if hora is None:
+        hora = _extraer_hora_explicita(_normalizar(texto))
+    if hora is None:
+        return None
+
+    fecha = _obtener_fecha_acordada(texto, historial)
+    if fecha is None and cita_actual is not None and cita_actual.fecha_cita:
+        fecha = cita_actual.fecha_cita
+    if fecha is None:
+        fecha = obtener_fecha_hoy_argentina()
+    return _ajustar_a_horario_laboral(fecha, hora)
+
+
 def procesar_cita_si_corresponde(sesion) -> int | None:
+    """
+    Crea o actualiza la cita según el historial.
+
+    Importante: si ya existe una cita en BD, cualquier hora nueva explícita
+    ("a las 11", "cambiá a las 11") la actualiza aunque el bot solo lo diga
+    en el chat.
+    """
     ultimo_mensaje = ""
+    ultimo_bot = ""
     for linea in reversed(sesion.historial):
-        if linea.startswith("Cliente:"):
+        if not ultimo_mensaje and linea.startswith("Cliente:"):
             ultimo_mensaje = linea.removeprefix("Cliente:").strip()
+        if not ultimo_bot and linea.startswith("Bot:"):
+            ultimo_bot = linea.removeprefix("Bot:").strip()
+        if ultimo_mensaje and ultimo_bot:
             break
 
-    if not detectar_visita(ultimo_mensaje, sesion.historial):
-        # Igual permitir actualizar hora si ya hay cita y el cliente dice "a las 10"
-        if sesion.cita_registrada_id and _extraer_hora_explicita(_normalizar(ultimo_mensaje)):
-            fecha_hora = extraer_fecha_hora_cita(ultimo_mensaje, sesion.historial)
-            if fecha_hora:
-                fecha_cita, hora_cita = fecha_hora
-                actualizar_hora_cita(sesion.cita_registrada_id, fecha_cita, hora_cita)
-                return sesion.cita_registrada_id
-        return None
+    cita_existente = _buscar_cita_activa_sesion(sesion)
+    if cita_existente:
+        sesion.cita_registrada_id = cita_existente.id
 
-    fecha_hora = extraer_fecha_hora_cita(ultimo_mensaje, sesion.historial)
+    quiere_visita = detectar_visita(ultimo_mensaje, sesion.historial)
+    quiere_cambiar = bool(cita_existente) and (
+        detectar_cambio_horario(ultimo_mensaje)
+        or detectar_cambio_horario(ultimo_bot)
+    )
+
+    if not quiere_visita and not quiere_cambiar:
+        return sesion.cita_registrada_id
+
+    # Para actualizar, priorizar hora del último mensaje del cliente; si el bot
+    # acaba de confirmar "a las 11", también cuenta.
+    texto_para_hora = ultimo_mensaje
+    if quiere_cambiar and not _extraer_hora_explicita(_normalizar(ultimo_mensaje)):
+        if _extraer_hora_explicita(_normalizar(ultimo_bot), solo_confirmacion=True):
+            texto_para_hora = ultimo_bot
+
+    fecha_hora = _extraer_fecha_hora_para_actualizar(
+        texto_para_hora, sesion.historial, cita_existente
+    )
+    if not fecha_hora and quiere_cambiar and ultimo_bot:
+        fecha_hora = _extraer_fecha_hora_para_actualizar(
+            ultimo_bot, sesion.historial, cita_existente
+        )
     if not fecha_hora:
-        return None
+        return sesion.cita_registrada_id
 
     fecha_cita, hora_cita = fecha_hora
 
-    # Si ya había cita (p.ej. se guardó 09:00 por la franja), actualizar a la hora real.
     if sesion.cita_registrada_id:
         actualizar_hora_cita(sesion.cita_registrada_id, fecha_cita, hora_cita)
         return sesion.cita_registrada_id
