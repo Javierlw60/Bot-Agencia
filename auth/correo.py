@@ -1,15 +1,12 @@
-"""Envío de correos de verificación.
-
-Proveedores (prioridad):
-  1. RESEND_API_KEY  → API de Resend
-  2. SENDGRID_API_KEY → API de SendGrid
-  3. SMTP_HOST (+ USER/PASSWORD/PORT) → SMTP clásico (Gmail, Outlook, etc.)
-  4. Sin config → imprime el enlace en logs (solo desarrollo)
+"""Envío de correos de verificación vía Resend.
 
 Variables:
-  SMTP_HOST, SMTP_PORT (587|465), SMTP_USER, SMTP_PASSWORD, SMTP_FROM, SMTP_TLS
-  RESEND_API_KEY, SENDGRID_API_KEY
-  DASHBOARD_BASE_URL / APP_URL / FRONTEND_URL (para armar el enlace)
+  RESEND_API_KEY  → obligatoria en producción
+  SMTP_FROM       → opcional; default noreply@bot-agencias.com.ar
+  DASHBOARD_BASE_URL / APP_URL / FRONTEND_URL → para armar el enlace
+
+Fallback de desarrollo: si no hay RESEND_API_KEY, imprime el enlace en logs.
+También acepta SMTP_* como respaldo opcional.
 """
 
 from __future__ import annotations
@@ -21,7 +18,7 @@ import smtplib
 import ssl
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from email.utils import formataddr
+from email.utils import formataddr, parseaddr
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -32,6 +29,9 @@ load_dotenv()
 
 logger = logging.getLogger("auth.correo")
 
+REMITENTE_DEFAULT = "noreply@bot-agencias.com.ar"
+REMITENTE_NOMBRE = "Bot Agencias"
+
 
 def _base_url() -> str:
     for nombre in ("DASHBOARD_BASE_URL", "APP_URL", "FRONTEND_URL"):
@@ -41,59 +41,17 @@ def _base_url() -> str:
     return "http://127.0.0.1:8080"
 
 
-def _smtp_from() -> str:
-    return (
-        os.getenv("SMTP_FROM", "").strip()
-        or os.getenv("SMTP_USER", "").strip()
-        or "noreply@bot-agencias.com.ar"
-    )
+def _remitente_email() -> str:
+    """Siempre usa noreply@bot-agencias.com.ar salvo override explícito de SMTP_FROM."""
+    crudo = os.getenv("SMTP_FROM", "").strip()
+    if not crudo:
+        return REMITENTE_DEFAULT
+    _, email = parseaddr(crudo)
+    return (email or crudo).strip() or REMITENTE_DEFAULT
 
 
-def _armar_mensaje(
-    destino: str, asunto: str, cuerpo_texto: str, cuerpo_html: str
-) -> MIMEMultipart:
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = asunto
-    msg["From"] = formataddr(("Bot Agencias", _smtp_from()))
-    msg["To"] = destino
-    msg.attach(MIMEText(cuerpo_texto, "plain", "utf-8"))
-    msg.attach(MIMEText(cuerpo_html, "html", "utf-8"))
-    return msg
-
-
-def _enviar_por_smtp(destino: str, asunto: str, cuerpo_texto: str, cuerpo_html: str) -> bool:
-    host = os.getenv("SMTP_HOST", "").strip()
-    if not host:
-        return False
-
-    user = os.getenv("SMTP_USER", "").strip()
-    password = os.getenv("SMTP_PASSWORD", "").strip()
-    port = int(os.getenv("SMTP_PORT", "587"))
-    usar_tls = os.getenv("SMTP_TLS", "true").lower() not in ("0", "false", "no")
-    remitente = _smtp_from()
-    msg = _armar_mensaje(destino, asunto, cuerpo_texto, cuerpo_html)
-
-    try:
-        if port == 465:
-            context = ssl.create_default_context()
-            with smtplib.SMTP_SSL(host, port, timeout=30, context=context) as server:
-                if user and password:
-                    server.login(user, password)
-                server.sendmail(remitente, [destino], msg.as_string())
-        else:
-            with smtplib.SMTP(host, port, timeout=30) as server:
-                if usar_tls:
-                    server.starttls(context=ssl.create_default_context())
-                if user and password:
-                    server.login(user, password)
-                server.sendmail(remitente, [destino], msg.as_string())
-        logger.info("[AUTH EMAIL] Enviado por SMTP a %s (host=%s:%s)", destino, host, port)
-        print(f"[AUTH EMAIL] Enviado por SMTP a {destino} via {host}:{port}")
-        return True
-    except Exception as exc:
-        logger.error("[AUTH EMAIL] Error SMTP: %s", exc)
-        print(f"[AUTH EMAIL] Error SMTP: {exc}")
-        return False
+def _remitente_header() -> str:
+    return formataddr((REMITENTE_NOMBRE, _remitente_email()))
 
 
 def _post_json(url: str, payload: dict[str, Any], headers: dict[str, str]) -> dict[str, Any]:
@@ -110,7 +68,7 @@ def _enviar_por_resend(destino: str, asunto: str, cuerpo_texto: str, cuerpo_html
         return False
 
     payload = {
-        "from": _smtp_from(),
+        "from": _remitente_header(),
         "to": [destino],
         "subject": asunto,
         "text": cuerpo_texto,
@@ -121,9 +79,18 @@ def _enviar_por_resend(destino: str, asunto: str, cuerpo_texto: str, cuerpo_html
         "Content-Type": "application/json",
     }
     try:
-        _post_json("https://api.resend.com/emails", payload, headers)
-        logger.info("[AUTH EMAIL] Enviado por Resend a %s", destino)
-        print(f"[AUTH EMAIL] Enviado por Resend a {destino}")
+        data = _post_json("https://api.resend.com/emails", payload, headers)
+        msg_id = data.get("id", "")
+        logger.info(
+            "[AUTH EMAIL] Enviado por Resend a %s (from=%s id=%s)",
+            destino,
+            _remitente_email(),
+            msg_id,
+        )
+        print(
+            f"[AUTH EMAIL] Enviado por Resend a {destino} "
+            f"from={_remitente_email()} id={msg_id}"
+        )
         return True
     except HTTPError as exc:
         detalle = exc.read().decode("utf-8", errors="replace")
@@ -136,57 +103,48 @@ def _enviar_por_resend(destino: str, asunto: str, cuerpo_texto: str, cuerpo_html
         return False
 
 
-def _enviar_por_sendgrid(destino: str, asunto: str, cuerpo_texto: str, cuerpo_html: str) -> bool:
-    api_key = os.getenv("SENDGRID_API_KEY", "").strip()
-    if not api_key:
+def _enviar_por_smtp(destino: str, asunto: str, cuerpo_texto: str, cuerpo_html: str) -> bool:
+    """Respaldo opcional si no hay Resend."""
+    host = os.getenv("SMTP_HOST", "").strip()
+    if not host:
         return False
 
-    payload = {
-        "personalizations": [{"to": [{"email": destino}]}],
-        "from": {"email": _smtp_from(), "name": "Bot Agencias"},
-        "subject": asunto,
-        "content": [
-            {"type": "text/plain", "value": cuerpo_texto},
-            {"type": "text/html", "value": cuerpo_html},
-        ],
-    }
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
+    user = os.getenv("SMTP_USER", "").strip()
+    password = os.getenv("SMTP_PASSWORD", "").strip()
+    port = int(os.getenv("SMTP_PORT", "587"))
+    usar_tls = os.getenv("SMTP_TLS", "true").lower() not in ("0", "false", "no")
+    remitente = _remitente_email()
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = asunto
+    msg["From"] = _remitente_header()
+    msg["To"] = destino
+    msg.attach(MIMEText(cuerpo_texto, "plain", "utf-8"))
+    msg.attach(MIMEText(cuerpo_html, "html", "utf-8"))
+
     try:
-        _post_json("https://api.sendgrid.com/v3/mail/send", payload, headers)
-        logger.info("[AUTH EMAIL] Enviado por SendGrid a %s", destino)
-        print(f"[AUTH EMAIL] Enviado por SendGrid a {destino}")
+        if port == 465:
+            context = ssl.create_default_context()
+            with smtplib.SMTP_SSL(host, port, timeout=30, context=context) as server:
+                if user and password:
+                    server.login(user, password)
+                server.sendmail(remitente, [destino], msg.as_string())
+        else:
+            with smtplib.SMTP(host, port, timeout=30) as server:
+                if usar_tls:
+                    server.starttls(context=ssl.create_default_context())
+                if user and password:
+                    server.login(user, password)
+                server.sendmail(remitente, [destino], msg.as_string())
+        print(f"[AUTH EMAIL] Enviado por SMTP a {destino} via {host}:{port}")
         return True
-    except HTTPError as exc:
-        detalle = exc.read().decode("utf-8", errors="replace")
-        # SendGrid responde 202 vacío a menudo; 202 no llega como HTTPError.
-        logger.error("[AUTH EMAIL] Error SendGrid HTTP %s: %s", exc.code, detalle)
-        print(f"[AUTH EMAIL] Error SendGrid HTTP {exc.code}: {detalle}")
+    except Exception as exc:
+        print(f"[AUTH EMAIL] Error SMTP: {exc}")
         return False
-    except (URLError, Exception) as exc:
-        logger.error("[AUTH EMAIL] Error SendGrid: %s", exc)
-        print(f"[AUTH EMAIL] Error SendGrid: {exc}")
-        return False
-
-
-def _imprimir_en_consola(destino: str, cuerpo_texto: str) -> bool:
-    print(f"\n[AUTH EMAIL -> {destino}] (sin proveedor configurado; solo logs)")
-    print(cuerpo_texto)
-    print(
-        "\n[AUTH EMAIL] Configurá RESEND_API_KEY, SENDGRID_API_KEY "
-        "o SMTP_HOST/SMTP_USER/SMTP_PASSWORD en Render.\n"
-    )
-    return True
 
 
 def correo_configurado() -> bool:
-    return bool(
-        os.getenv("RESEND_API_KEY", "").strip()
-        or os.getenv("SENDGRID_API_KEY", "").strip()
-        or os.getenv("SMTP_HOST", "").strip()
-    )
+    return bool(os.getenv("RESEND_API_KEY", "").strip() or os.getenv("SMTP_HOST", "").strip())
 
 
 def enviar_correo_verificacion(destino: str, token: str, nombre: str) -> bool:
@@ -209,14 +167,18 @@ def enviar_correo_verificacion(destino: str, token: str, nombre: str) -> bool:
 
     if _enviar_por_resend(destino, asunto, cuerpo_texto, cuerpo_html):
         return True
-    if _enviar_por_sendgrid(destino, asunto, cuerpo_texto, cuerpo_html):
-        return True
+
     if os.getenv("SMTP_HOST", "").strip():
         ok = _enviar_por_smtp(destino, asunto, cuerpo_texto, cuerpo_html)
         if ok:
             return True
-        # Si SMTP falló, igual dejamos el enlace en logs para no bloquear el alta.
         print(cuerpo_texto)
         return False
 
-    return _imprimir_en_consola(destino, cuerpo_texto)
+    print(f"\n[AUTH EMAIL -> {destino}] (falta RESEND_API_KEY; solo logs)")
+    print(cuerpo_texto)
+    print(
+        "\n[AUTH EMAIL] En Render agregá RESEND_API_KEY. "
+        f"Remitente: {REMITENTE_DEFAULT}\n"
+    )
+    return True
