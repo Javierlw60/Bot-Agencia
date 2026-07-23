@@ -65,7 +65,6 @@ def detectar_visita(texto: str, historial: list[str] | None = None) -> bool:
         "paso manana",
         "ir a verlo",
         "ir a la agencia",
-        "pasame la direccion",
         "dale voy",
         "quiero verlo",
         "voy al local",
