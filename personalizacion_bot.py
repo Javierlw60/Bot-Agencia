@@ -72,12 +72,12 @@ def obtener_nombre_agencia_bot(
     sucursal: Sucursal | None = None,
     vendedor: Vendedor | None = None,
 ) -> str:
-    """Nombre comercial que dice el bot: sucursal → agencia."""
+    """Nombre comercial que dice el bot: agencia (oficial) → sucursal."""
     del vendedor
-    valor = _valor(sucursal, "nombre_comercial")
+    valor = _valor(agencia, "nombre_agencia") or _valor(agencia, "nombre")
     if valor:
         return valor
-    valor = _valor(agencia, "nombre_agencia") or _valor(agencia, "nombre")
+    valor = _valor(sucursal, "nombre_comercial")
     return valor or NOMBRE_AGENCIA_DEFAULT
 
 
@@ -85,8 +85,8 @@ def obtener_direccion_bot(
     agencia: Agencia,
     sucursal: Sucursal | None = None,
 ) -> str | None:
-    """Dirección oficial para visitas: sucursal de contacto → agencia."""
-    valor = _valor(sucursal, "direccion") or _valor(agencia, "direccion")
+    """Dirección oficial para visitas: agencia → sucursal de contacto."""
+    valor = _valor(agencia, "direccion") or _valor(sucursal, "direccion")
     return valor or None
 
 

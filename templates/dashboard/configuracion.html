@@ -66,7 +66,7 @@
       </span>
       {% endif %}
     </div>
-    <p class="page-subtitle mt-0.5">Línea del bot de la agencia, sucursales y equipo de contacto.</p>
+    <p class="page-subtitle mt-0.5">1) Agencia + línea del bot · 2) Sucursales · 3) Vendedores (celulares reales).</p>
   </div>
 </div>
 
@@ -94,6 +94,8 @@
 <div class="ui-card mb-3 px-4 py-2.5 text-sm" style="color: #fca5a5;">El Phone Number ID de WhatsApp es obligatorio.</div>
 {% elif _err == 'linea_bot_invalida' %}
 <div class="ui-card mb-3 px-4 py-2.5 text-sm" style="color: #fca5a5;">Ingresá el Phone Number ID de Meta (no un celular 549…).</div>
+{% elif _err == 'contacto_es_linea_bot' %}
+<div class="ui-card mb-3 px-4 py-2.5 text-sm" style="color: #fca5a5;">«Teléfono de contacto» debe ser un teléfono real (ej. 11 4567-8900), no el Phone Number ID de Meta. Ese ID va solo en el campo de la línea del bot.</div>
 {% elif _err == 'ultimo_vendedor' %}
 <div class="ui-card mb-3 px-4 py-2.5 text-sm" style="color: #fca5a5;">No podés eliminar el único vendedor de la sucursal.</div>
 {% endif %}
@@ -120,9 +122,10 @@
         id="form-agencia" class="ui-card js-save-form flex flex-col gap-3 p-4 sm:p-5" novalidate>
     <input type="hidden" name="sucursal_id" value="{{ sucursal_activa.id }}">
     <div>
-      <h2 class="text-base font-semibold" style="color: var(--title);">Datos de la agencia</h2>
+      <h2 class="text-base font-semibold" style="color: var(--title);">1. Datos de la agencia (bot)</h2>
       <p class="mt-0.5 text-sm" style="color: var(--muted);">
-        Línea oficial de WhatsApp Business e identidad del bot. El bot atiende esta línea; los vendedores no.
+        Acá va el Phone Number ID de Meta, el nombre del bot y la dirección oficial.
+        Los vendedores se cargan más abajo y no atienden esta línea.
       </p>
     </div>
     <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -147,7 +150,7 @@
         <span class="ui-label">Teléfono de contacto de la agencia</span>
         <input name="telefono_contacto" inputmode="tel"
                value="{{ agencia.telefono_contacto or '' }}"
-               placeholder="Ej: 11 4567-8900" class="ui-input">
+               placeholder="Ej: 11 4567-8900 (NO el Phone Number ID)" class="ui-input">
       </label>
       <label class="block">
         <span class="ui-label">Asesor virtual (nombre del bot)</span>
@@ -260,9 +263,9 @@
 <form method="post" action="/dashboard/{{ agencia.id }}/configuracion" class="ui-card mb-3 flex flex-col gap-3 p-4 sm:p-5" novalidate>
   <input type="hidden" name="sucursal_id" value="{{ sucursal_activa.id }}">
   <div>
-    <h2 class="text-base font-semibold" style="color: var(--title);">Datos de la sucursal</h2>
+    <h2 class="text-base font-semibold" style="color: var(--title);">2. Datos de la sucursal</h2>
     <p class="mt-0.5 text-sm" style="color: var(--muted);">
-      Editando <strong style="color: var(--title);">{{ sucursal_activa.nombre }}</strong>
+      Sede física. El nombre del bot y la línea de WhatsApp están arriba, en la agencia.
     </p>
   </div>
   <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -283,9 +286,10 @@
   <div class="sucursales-section-head px-4 py-3 sm:px-5">
     <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
       <div>
-        <h2 class="text-base font-semibold" style="color: var(--title);">Equipo de Ventas</h2>
+        <h2 class="text-base font-semibold" style="color: var(--title);">3. Equipo de Ventas</h2>
         <p class="mt-0.5 text-sm" style="color: color-mix(in srgb, var(--title) 72%, var(--muted));">
-          Contactos humanos de <strong style="color: var(--title);">{{ sucursal_activa.nombre }}</strong> · celular real para citas. El bot atiende la línea de la agencia.
+          Personas de <strong style="color: var(--title);">{{ sucursal_activa.nombre }}</strong> · celular real (549…) para citas.
+          No pongas acá el Phone Number ID: eso es de la agencia.
         </p>
       </div>
       <form method="post" action="/dashboard/{{ agencia.id }}/configuracion/vendedores">

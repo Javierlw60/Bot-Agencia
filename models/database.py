@@ -335,7 +335,20 @@ def inicializar_base_de_datos():
     _migrar_sucursal_en_entidades()
     _sembrar_vendedor_principal()
     _migrar_estados_cita()
+    _migrar_lineas_bot_a_agencia()
     _sembrar_usuario_demo()
+
+
+def _migrar_lineas_bot_a_agencia() -> None:
+    """Mueve Phone Number IDs de Meta pegados en vendedores/sucursales → agencia."""
+    try:
+        from inventory import migrar_lineas_bot_desde_equipo
+
+        n = migrar_lineas_bot_desde_equipo()
+        if n:
+            print(f"[DB] Líneas de bot reparadas desde equipo: {n}")
+    except Exception as exc:
+        print(f"[DB] No se pudo migrar líneas de bot desde equipo: {exc}")
 
 
 def _migrar_columnas_agencias():
