@@ -286,25 +286,10 @@ _PATRON_LINEA_URL_FOTO = re.compile(
 
 
 def listar_origenes_fotos_auto(auto: Auto, base_url: str = "") -> list[str]:
-    """
-    Devuelve orígenes listos para envío por WhatsApp:
-    - path relativo /static/... (preferido: se sube el archivo local)
-    - o URL absoluta si la foto ya es http(s)
-    """
+    """Orígenes para envío WA: paths /static/... (subida local) o URLs http(s)."""
+    del base_url  # se usa en el fallback de envío, no acá
     fotos = obtener_fotos_auto(auto)
-    if not fotos:
-        return []
-    base = (base_url or "").rstrip("/")
-    origenes: list[str] = []
-    for foto in fotos[:_MAX_FOTOS_WHATSAPP]:
-        if foto.startswith(("http://", "https://")):
-            origenes.append(foto)
-        elif foto.startswith("/"):
-            # Mantener path local para subir a Meta; base_url solo como fallback de link.
-            origenes.append(foto if not base else foto)
-        else:
-            origenes.append(foto)
-    return origenes
+    return [f for f in fotos[:_MAX_FOTOS_WHATSAPP] if f]
 
 
 def formatear_fotos_para_whatsapp(auto: Auto, base_url: str = "") -> str:
