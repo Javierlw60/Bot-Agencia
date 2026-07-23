@@ -209,6 +209,11 @@ def _entregar_respuesta_whatsapp(
     sesion: SesionCliente | None = None,
 ) -> None:
     """Muestra la respuesta en consola y/o la envía por WhatsApp (una sola modalidad)."""
+    from formato_hora import normalizar_horas_mensaje_24h
+
+    # Gemini a veces dice "2 hs"; forzamos 14:00 hs en texto y en el audio.
+    texto = normalizar_horas_mensaje_24h(texto or "")
+
     if not via_whatsapp:
         print("\nBot:", texto)
     sucursal = _sucursal_sesion_bot(sesion) if sesion else None
@@ -1172,13 +1177,16 @@ def _procesar_mensaje(
         logger.error("[GEMINI Exception] %s", e, exc_info=True)
         respuesta_bot = "Che, se me cortó la señal en el playón. ¿Me repetís lo último?"
 
+    # Gemini a veces inventa [IMAGEN 1…] o dice "2 hs"; normalizar antes de guardar/enviar.
+    from formato_hora import normalizar_horas_mensaje_24h
+
+    respuesta_bot = limpiar_placeholders_imagen_en_texto(respuesta_bot)
+    respuesta_bot = normalizar_horas_mensaje_24h(respuesta_bot)
+
     sesion.historial.append(f"Bot: {respuesta_bot}")
     _persistir_mensaje(sesion, "bot", respuesta_bot)
 
     procesar_cita_si_corresponde(sesion)
-
-    # Gemini a veces inventa [IMAGEN 1…]; nunca deben llegar al cliente como texto.
-    respuesta_bot = limpiar_placeholders_imagen_en_texto(respuesta_bot)
 
     auto_fotos = None
     enviar_fotos = False
