@@ -1,10 +1,14 @@
 """
 Speech-to-Text para audios de WhatsApp.
 
-Motor recomendado: OpenAI Whisper API (whisper-1)
-- Muy preciso en español rioplatense, ~USD 0.006/minuto.
-- Alternativa local sin costo: STT_MOTOR=local con faster-whisper (requiere pip install faster-whisper).
+Motores (STT_MOTOR):
+  - auto   → Gemini si hay GEMINI_API_KEY, si no OpenAI Whisper, si no local
+  - gemini → Google Gemini (usa GEMINI_API_KEY, ya configurada para el bot)
+  - openai → OpenAI Whisper API (requiere OPENAI_API_KEY)
+  - local  → faster-whisper (pip install faster-whisper)
 """
+
+from __future__ import annotations
 
 import json
 import mimetypes
@@ -19,8 +23,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 OPENAI_API_BASE = "https://api.openai.com/v1"
-STT_MOTOR = os.getenv("STT_MOTOR", "openai").strip().lower()
+STT_MOTOR = os.getenv("STT_MOTOR", "auto").strip().lower()
 STT_IDIOMA = os.getenv("STT_IDIOMA", "es")
+STT_GEMINI_MODELO = os.getenv("STT_GEMINI_MODELO", "gemini-2.0-flash").strip()
 
 
 class SpeechToTextError(Exception):
@@ -34,10 +39,35 @@ def _token_openai() -> str:
     return token
 
 
+def _token_gemini() -> str:
+    token = (
+        os.getenv("GEMINI_API_KEY", "").strip()
+        or os.getenv("GOOGLE_API_KEY", "").strip()
+    )
+    if not token:
+        raise SpeechToTextError("GEMINI_API_KEY no configurada para STT.")
+    return token
+
+
+def _mime_audio(archivo: Path) -> str:
+    mime = mimetypes.guess_type(archivo.name)[0]
+    if mime:
+        return mime
+    ext = archivo.suffix.lower()
+    return {
+        ".ogg": "audio/ogg",
+        ".opus": "audio/ogg",
+        ".mp3": "audio/mpeg",
+        ".wav": "audio/wav",
+        ".m4a": "audio/mp4",
+        ".webm": "audio/webm",
+    }.get(ext, "audio/ogg")
+
+
 def _multipart_transcripcion(archivo: Path, modelo: str, idioma: str) -> tuple[bytes, str]:
     boundary = uuid.uuid4().hex
     contenido = archivo.read_bytes()
-    mime = mimetypes.guess_type(archivo.name)[0] or "application/octet-stream"
+    mime = _mime_audio(archivo)
     partes: list[bytes] = [
         f"--{boundary}\r\n".encode(),
         (
@@ -86,6 +116,41 @@ def _transcribir_openai(archivo: Path) -> str:
     return texto
 
 
+def _transcribir_gemini(archivo: Path) -> str:
+    try:
+        from google import genai
+        from google.genai import types
+    except ImportError as exc:
+        raise SpeechToTextError(
+            "Falta el paquete google-genai para STT con Gemini."
+        ) from exc
+
+    api_key = _token_gemini()
+    client = genai.Client(api_key=api_key)
+    audio_bytes = archivo.read_bytes()
+    prompt = (
+        "Transcribí este audio de WhatsApp al español. "
+        "Devolvé SOLO la transcripción literal del habla, sin comillas, "
+        "sin comentarios ni puntuación inventada de más. "
+        f"Idioma esperado: {STT_IDIOMA}."
+    )
+    try:
+        respuesta = client.models.generate_content(
+            model=STT_GEMINI_MODELO,
+            contents=[
+                prompt,
+                types.Part.from_bytes(data=audio_bytes, mime_type=_mime_audio(archivo)),
+            ],
+        )
+    except Exception as exc:
+        raise SpeechToTextError(f"Gemini STT falló: {exc}") from exc
+
+    texto = (getattr(respuesta, "text", None) or "").strip()
+    if not texto:
+        raise SpeechToTextError("Gemini no devolvió texto en la transcripción.")
+    return texto
+
+
 def _transcribir_local(archivo: Path) -> str:
     try:
         from faster_whisper import WhisperModel
@@ -104,14 +169,54 @@ def _transcribir_local(archivo: Path) -> str:
     return texto
 
 
+def _motores_auto() -> list[str]:
+    orden: list[str] = []
+    if os.getenv("GEMINI_API_KEY", "").strip() or os.getenv("GOOGLE_API_KEY", "").strip():
+        orden.append("gemini")
+    if os.getenv("OPENAI_API_KEY", "").strip():
+        orden.append("openai")
+    orden.append("local")
+    return orden
+
+
 def transcribir_audio(archivo: Path) -> str:
     """Convierte un archivo de audio a texto."""
     if not archivo.exists() or archivo.stat().st_size == 0:
         raise SpeechToTextError(f"Archivo de audio inválido: {archivo}")
 
-    if STT_MOTOR == "local":
+    motor = STT_MOTOR or "auto"
+    if motor == "auto":
+        motores = _motores_auto()
+        errores: list[str] = []
+        for nombre in motores:
+            try:
+                if nombre == "gemini":
+                    texto = _transcribir_gemini(archivo)
+                elif nombre == "openai":
+                    texto = _transcribir_openai(archivo)
+                else:
+                    texto = _transcribir_local(archivo)
+                print(f"[STT] OK con motor={nombre}")
+                return texto
+            except SpeechToTextError as exc:
+                errores.append(f"{nombre}: {exc}")
+                print(f"[STT] Falló motor={nombre}: {exc}")
+        raise SpeechToTextError(
+            "Ningún motor STT pudo transcribir. "
+            + " | ".join(errores)
+            + ". Configurá GEMINI_API_KEY (recomendado) u OPENAI_API_KEY, "
+            "o STT_MOTOR=local con faster-whisper."
+        )
+
+    if motor == "gemini":
+        return _transcribir_gemini(archivo)
+    if motor == "local":
         return _transcribir_local(archivo)
-    return _transcribir_openai(archivo)
+    if motor == "openai":
+        return _transcribir_openai(archivo)
+    raise SpeechToTextError(
+        f"STT_MOTOR={motor!r} no soportado. Usá auto|gemini|openai|local."
+    )
 
 
 def convertir_audio_a_texto(archivo: Path) -> str:

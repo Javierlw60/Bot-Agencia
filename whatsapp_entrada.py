@@ -62,6 +62,7 @@ def procesar_texto_whatsapp(
     _aplicar_sucursal_sesion(
         sesion, sucursal, vendedor, phone_number_id_meta=phone_number_id_meta
     )
+    sesion.entrada_fue_audio = False
     _enviar_bienvenida_inicial(sesion, agencia, via_whatsapp=True)
     respuesta = _procesar_mensaje(sesion, agencia, texto, via_whatsapp=True)
     _finalizar_y_guardar_lead(sesion)
@@ -81,6 +82,7 @@ def procesar_audio_whatsapp(
     """
     Flujo completo de audio entrante:
     descarga → STT → auditoría → limpieza → procesar_mensaje.
+    Responde en voz (espejo de modalidad).
     """
     DIR_TEMP_AUDIO.mkdir(parents=True, exist_ok=True)
     archivo_temp = DIR_TEMP_AUDIO / f"{media_id}.ogg"
@@ -93,8 +95,10 @@ def procesar_audio_whatsapp(
 
     try:
         descargar_media_whatsapp(media_id, archivo_temp)
+        print(f"[STT] Transcribiendo audio media_id={media_id}…")
         transcripcion = convertir_audio_a_texto(archivo_temp)
         resultado["transcripcion"] = transcripcion
+        print(f"[STT] Transcripción: {transcripcion!r}")
 
         audio_archivado = archivar_audio_auditoria(
             archivo_temporal=archivo_temp,
@@ -106,6 +110,7 @@ def procesar_audio_whatsapp(
         _aplicar_sucursal_sesion(
             sesion, sucursal, vendedor, phone_number_id_meta=phone_number_id_meta
         )
+        sesion.entrada_fue_audio = True
         auditoria_id = registrar_interaccion_audio(
             agencia_id=agencia.id,
             telefono=telefono,
@@ -130,6 +135,7 @@ def procesar_audio_whatsapp(
         resultado["ok"] = True
         return resultado
     except SpeechToTextError as exc:
+        print(f"[STT] Error: {exc}")
         sesion = obtener_o_crear_sesion(agencia.id, telefono)
         _aplicar_sucursal_sesion(
             sesion, sucursal, vendedor, phone_number_id_meta=phone_number_id_meta
@@ -137,13 +143,14 @@ def procesar_audio_whatsapp(
         mensaje_error = (
             "No pude entender el audio. ¿Podés escribirme tu consulta por texto?"
         )
+        # Fallback siempre en texto (no intentar TTS si STT falló).
         enviar_respuesta_bot(
             telefono_destino=telefono,
             mensaje=mensaje_error,
             whatsapp_phone_number_id=_linea_whatsapp_respuesta(
                 agencia, sesion, sucursal=sucursal, vendedor=vendedor
             ),
-            modo_respuesta=agencia.modo_respuesta,
+            modo_respuesta="texto",
             imprimir_texto_en_consola=False,
         )
         resultado["respuesta"] = mensaje_error
