@@ -26,12 +26,14 @@ from inventory import (
     formatear_fotos_para_whatsapp,
     formatear_opciones_stock_cruzado,
     guardar_lead_comercial,
+    limpiar_placeholders_imagen_en_texto,
+    listar_origenes_fotos_auto,
     obtener_auto_por_id,
     obtener_inventario_agencia,
     obtener_nombre_sucursal,
 )
 from models.database import Agencia, SessionLocal, inicializar_base_de_datos
-from whatsapp import enviar_respuesta_bot
+from whatsapp import enviar_imagen_whatsapp, enviar_respuesta_bot
 from whatsapp_linea import linea_envio_whatsapp_api
 from permuta import (
     INSTRUCCIONES_PERMUTA,
@@ -208,6 +210,61 @@ def _entregar_respuesta_whatsapp(
         modo_respuesta=agencia.modo_respuesta,
         imprimir_texto_en_consola=not via_whatsapp,
     )
+
+
+def _base_url_publica() -> str:
+    for nombre in ("DASHBOARD_BASE_URL", "APP_URL", "FRONTEND_URL"):
+        valor = os.getenv(nombre, "").strip().rstrip("/")
+        if valor:
+            return valor
+    return "http://127.0.0.1:8080"
+
+
+def _enviar_fotos_auto_whatsapp(
+    agencia: Agencia,
+    telefono: str,
+    auto,
+    sesion: SesionCliente | None = None,
+) -> int:
+    """Envía fotos reales del auto por WhatsApp. Devuelve cuántas se enviaron."""
+    origenes = listar_origenes_fotos_auto(auto, base_url=_base_url_publica())
+    if not origenes:
+        return 0
+
+    line_id = linea_envio_whatsapp_api(
+        agencia,
+        phone_number_id_receptor=sesion.line_whatsapp_id if sesion else None,
+        sucursal=_sucursal_sesion_bot(sesion) if sesion else None,
+        vendedor=_vendedor_sesion_bot(sesion) if sesion else None,
+    )
+    enviadas = 0
+    for idx, origen in enumerate(origenes):
+        caption = ""
+        if idx == 0:
+            caption = f"{auto.marca} {auto.modelo} {auto.ano}".strip()
+        # Si no hay archivo local, intentar URL pública absoluta.
+        destino = origen
+        if origen.startswith("/") and not origen.startswith("//"):
+            local_ok = origen  # enviar_imagen resuelve /static/...
+            destino = local_ok
+        ok = enviar_imagen_whatsapp(
+            telefono_destino=telefono,
+            imagen_url_o_ruta=destino,
+            whatsapp_phone_number_id=line_id,
+            caption=caption,
+        )
+        if not ok and origen.startswith("/"):
+            # Fallback: link público por si el archivo no está en este filesystem.
+            url_publica = f"{_base_url_publica()}{origen}"
+            ok = enviar_imagen_whatsapp(
+                telefono_destino=telefono,
+                imagen_url_o_ruta=url_publica,
+                whatsapp_phone_number_id=line_id,
+                caption=caption,
+            )
+        if ok:
+            enviadas += 1
+    return enviadas
 
 
 def _formatear_fecha_es(fecha: datetime.date) -> str:
@@ -816,14 +873,14 @@ def _construir_directiva_vendedor(agencia: Agencia, sesion: SesionCliente) -> st
     if sesion.auto_interes_id:
         auto = obtener_auto_por_id(sesion.agencia_id, sesion.auto_interes_id)
         if auto:
-            bloque_fotos = formatear_fotos_para_whatsapp(
-                auto, base_url=os.getenv("DASHBOARD_BASE_URL", "http://127.0.0.1:8000")
-            )
-            if bloque_fotos:
+            origenes = listar_origenes_fotos_auto(auto, base_url=_base_url_publica())
+            if origenes:
                 contexto_fotos = (
-                    f"\nFOTOS DE PREVENTA DISPONIBLES para {auto.marca} {auto.modelo}: "
-                    f"si el cliente pide ver fotos/imágenes, confirmá con entusiasmo y "
-                    f"decile que se las enviás ahora. URLs:\n{bloque_fotos}"
+                    f"\nFOTOS DE PREVENTA DISPONIBLES para {auto.marca} {auto.modelo} "
+                    f"({len(origenes)} archivo/s). Si el cliente pide ver fotos/imágenes, "
+                    "confirmá con entusiasmo que se las mandás ahora. "
+                    "PROHIBIDO inventar [IMAGEN …], pegar URLs o simular adjuntos: "
+                    "el sistema enviará las fotos reales automáticamente después de tu texto."
                 )
     return (
         f"{agencia.prompt_personalizado or ''}\n"
@@ -971,18 +1028,42 @@ def _procesar_mensaje(
 
     procesar_cita_si_corresponde(sesion)
 
+    # Gemini a veces inventa [IMAGEN 1…]; nunca deben llegar al cliente como texto.
+    respuesta_bot = limpiar_placeholders_imagen_en_texto(respuesta_bot)
+
+    auto_fotos = None
+    enviar_fotos = False
     if cliente_pide_fotos(texto) and sesion.auto_interes_id:
-        auto = obtener_auto_por_id(sesion.agencia_id, sesion.auto_interes_id)
-        if auto:
-            bloque_fotos = formatear_fotos_para_whatsapp(
-                auto, base_url=os.getenv("DASHBOARD_BASE_URL", "http://127.0.0.1:8000")
-            )
-            if bloque_fotos:
-                respuesta_bot = f"{respuesta_bot}\n\n{bloque_fotos}"
+        auto_fotos = obtener_auto_por_id(sesion.agencia_id, sesion.auto_interes_id)
+        if auto_fotos and listar_origenes_fotos_auto(auto_fotos):
+            enviar_fotos = True
+            if not respuesta_bot.strip():
+                respuesta_bot = (
+                    f"¡Dale! Te mando las fotos del "
+                    f"{auto_fotos.marca} {auto_fotos.modelo} {auto_fotos.ano}."
+                )
 
     _entregar_respuesta_whatsapp(
         agencia, sesion.telefono, respuesta_bot, via_whatsapp=via_whatsapp, sesion=sesion
     )
+
+    if enviar_fotos and auto_fotos is not None:
+        enviadas = _enviar_fotos_auto_whatsapp(
+            agencia, sesion.telefono, auto_fotos, sesion=sesion
+        )
+        if enviadas == 0:
+            bloque_fotos = formatear_fotos_para_whatsapp(
+                auto_fotos, base_url=_base_url_publica()
+            )
+            if bloque_fotos:
+                _entregar_respuesta_whatsapp(
+                    agencia,
+                    sesion.telefono,
+                    bloque_fotos,
+                    via_whatsapp=via_whatsapp,
+                    sesion=sesion,
+                )
+
     return respuesta_bot
 
 

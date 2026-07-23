@@ -274,7 +274,26 @@ def cliente_pide_fotos(texto: str) -> bool:
     return bool(_PATRON_PEDIDO_FOTOS.search(texto))
 
 
+_MAX_FOTOS_WHATSAPP = 8
+_PATRON_PLACEHOLDER_IMAGEN = re.compile(
+    r"\[?\s*IMAGEN\s*\d*[^\]\n]*\]?",
+    re.IGNORECASE,
+)
+_PATRON_LINEA_URL_FOTO = re.compile(
+    r"^(?:📷\s*)?(?:Fotos\s*[—\-].*)?https?://\S+$|^/static/\S+$",
+    re.IGNORECASE,
+)
+
+
+def listar_origenes_fotos_auto(auto: Auto, base_url: str = "") -> list[str]:
+    """Orígenes para envío WA: paths /static/... (subida local) o URLs http(s)."""
+    del base_url  # se usa en el fallback de envío, no acá
+    fotos = obtener_fotos_auto(auto)
+    return [f for f in fotos[:_MAX_FOTOS_WHATSAPP] if f]
+
+
 def formatear_fotos_para_whatsapp(auto: Auto, base_url: str = "") -> str:
+    """Texto de respaldo con URLs (solo si no se pueden enviar como media)."""
     fotos = obtener_fotos_auto(auto)
     if not fotos:
         return ""
@@ -286,6 +305,29 @@ def formatear_fotos_para_whatsapp(auto: Auto, base_url: str = "") -> str:
         else:
             urls.append(foto)
     return titulo + "\n" + "\n".join(urls)
+
+
+def limpiar_placeholders_imagen_en_texto(texto: str) -> str:
+    """Saca inventos tipo [IMAGEN 1 del …] y líneas que solo son URLs de foto."""
+    if not texto:
+        return texto
+    limpio = _PATRON_PLACEHOLDER_IMAGEN.sub("", texto)
+    lineas: list[str] = []
+    for linea in limpio.splitlines():
+        t = linea.strip()
+        if not t:
+            lineas.append("")
+            continue
+        if t.startswith("📷 Fotos"):
+            continue
+        if t.startswith(("http://", "https://", "/static/")):
+            continue
+        if _PATRON_LINEA_URL_FOTO.match(t):
+            continue
+        lineas.append(linea)
+    # Colapsar saltos múltiples
+    resultado = re.sub(r"\n{3,}", "\n\n", "\n".join(lineas)).strip()
+    return resultado
 
 
 def buscar_auto_por_texto(agencia_id: int, texto: str) -> Auto | None:
