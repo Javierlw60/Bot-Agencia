@@ -178,10 +178,16 @@ def _ruta_local_imagen(url_o_ruta: str) -> Path | None:
     if candidato.is_file():
         return candidato
     if valor.startswith("/static/"):
-        base = Path(__file__).resolve().parent
-        local = base / valor.lstrip("/")
+        from paths_datos import static_dir
+
+        rel = valor[len("/static/") :]
+        local = static_dir() / rel
         if local.is_file():
             return local
+        # Fallback al static del repo (assets no persistentes).
+        local_repo = Path(__file__).resolve().parent / "static" / rel
+        if local_repo.is_file():
+            return local_repo
     return None
 
 

@@ -1,5 +1,7 @@
 import re
 
+from sqlalchemy import func
+
 from dashboard.media import obtener_fotos_auto
 from models.database import Agencia, Auto, ProspectoLead, SessionLocal, Sucursal, Vendedor
 
@@ -145,7 +147,7 @@ def obtener_inventario_agencia(agencia_id: int) -> str:
         mapa = _mapa_nombres_sucursales(db, agencia_id)
         autos = (
             db.query(Auto)
-            .filter(Auto.agencia_id == agencia_id, Auto.estado == "Disponible")
+            .filter(Auto.agencia_id == agencia_id, func.lower(Auto.estado) == "disponible")
             .order_by(Auto.sucursal_id, Auto.marca, Auto.modelo)
             .all()
         )
@@ -204,7 +206,7 @@ def obtener_autos_disponibles(agencia_id: int) -> list[Auto]:
     try:
         return (
             db.query(Auto)
-            .filter(Auto.agencia_id == agencia_id, Auto.estado == "Disponible")
+            .filter(Auto.agencia_id == agencia_id, func.lower(Auto.estado) == "disponible")
             .all()
         )
     finally:

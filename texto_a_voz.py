@@ -14,10 +14,12 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from paths_datos import static_dir
+
 load_dotenv()
 
-BASE_DIR = Path(__file__).resolve().parent
-CACHE_TTS_DIR = BASE_DIR / "static" / "cache" / "tts"
+CACHE_TTS_DIR = static_dir() / "cache" / "tts"
+CACHE_TTS_DIR.mkdir(parents=True, exist_ok=True)
 VOZ_DEFAULT = os.getenv("TTS_VOZ", "es-AR-ElenaNeural")
 MAX_CARACTERES_TTS = int(os.getenv("TTS_MAX_CARACTERES", "1500"))
 
@@ -74,7 +76,7 @@ def url_publica_audio(ruta: Path) -> str:
     """URL HTTP del audio servido por FastAPI (/static/...)."""
     base = os.getenv("DASHBOARD_BASE_URL", "http://127.0.0.1:8080").rstrip("/")
     try:
-        rel = ruta.resolve().relative_to((BASE_DIR / "static").resolve())
+        rel = ruta.resolve().relative_to(static_dir().resolve())
     except ValueError:
         rel = Path("cache") / "tts" / ruta.name
     return f"{base}/static/{rel.as_posix()}"

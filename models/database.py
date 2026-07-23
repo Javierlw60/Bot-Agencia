@@ -1,5 +1,8 @@
 import datetime
+import os
+from pathlib import Path
 
+from dotenv import load_dotenv
 from sqlalchemy import (
     Boolean,
     Column,
@@ -11,9 +14,12 @@ from sqlalchemy import (
     String,
     Text,
     create_engine,
+    inspect,
     text,
 )
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
+
+load_dotenv()
 
 Base = declarative_base()
 
@@ -233,9 +239,81 @@ class Vendedor(Base):
     agencia = relationship("Agencia")
 
 
-DATABASE_URL = "sqlite:///./bot_agencias_multitenant.db"
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+def _normalizar_database_url(url: str) -> str:
+    """Acepta URLs de Supabase/Render y las adapta al driver psycopg v3."""
+    valor = (url or "").strip()
+    if not valor:
+        return valor
+    if valor.startswith("postgres://"):
+        valor = "postgresql://" + valor[len("postgres://") :]
+    if valor.startswith("postgresql://") and "+psycopg" not in valor.split("://", 1)[0]:
+        valor = "postgresql+psycopg://" + valor[len("postgresql://") :]
+    return valor
+
+
+def _sqlite_default_path() -> Path:
+    """Si hay DATA_DIR (disco persistente), el .db vive ahí."""
+    data = os.getenv("DATA_DIR", "").strip()
+    if data:
+        base = Path(data)
+        base.mkdir(parents=True, exist_ok=True)
+        return base / "bot_agencias_multitenant.db"
+    return Path(__file__).resolve().parent.parent / "bot_agencias_multitenant.db"
+
+
+def _resolver_database_url() -> str:
+    cruda = os.getenv("DATABASE_URL", "").strip()
+    if cruda:
+        return _normalizar_database_url(cruda)
+    return f"sqlite:///{_sqlite_default_path().as_posix()}"
+
+
+def _crear_engine(url: str):
+    if url.startswith("sqlite"):
+        return create_engine(url, connect_args={"check_same_thread": False})
+    # Postgres / Supabase: pool_pre_ping evita conexiones muertas tras idle.
+    return create_engine(url, pool_pre_ping=True)
+
+
+DATABASE_URL = _resolver_database_url()
+engine = _crear_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+
+def es_sqlite() -> bool:
+    return engine.dialect.name == "sqlite"
+
+
+def es_postgres() -> bool:
+    return engine.dialect.name in ("postgresql", "postgres")
+
+
+def _tabla_tiene_columna(nombre_tabla: str, nombre_columna: str) -> bool:
+    try:
+        cols = {c["name"] for c in inspect(engine).get_columns(nombre_tabla)}
+        return nombre_columna in cols
+    except Exception:
+        return False
+
+
+def _agregar_columna_si_falta(nombre_tabla: str, nombre_columna: str, tipo_sql: str) -> None:
+    if _tabla_tiene_columna(nombre_tabla, nombre_columna):
+        return
+    with engine.begin() as conn:
+        if es_postgres():
+            conn.execute(
+                text(
+                    f"ALTER TABLE {nombre_tabla} "
+                    f"ADD COLUMN IF NOT EXISTS {nombre_columna} {tipo_sql}"
+                )
+            )
+        else:
+            try:
+                conn.execute(
+                    text(f"ALTER TABLE {nombre_tabla} ADD COLUMN {nombre_columna} {tipo_sql}")
+                )
+            except Exception:
+                pass
 
 
 def inicializar_base_de_datos():
@@ -274,12 +352,9 @@ def _migrar_columnas_agencias():
         "nombre_agencia": "VARCHAR(100)",
         "nombre_bot": "VARCHAR(80)",
     }
+    for nombre_col, tipo in columnas.items():
+        _agregar_columna_si_falta("agencias", nombre_col, tipo)
     with engine.begin() as conn:
-        for nombre_col, tipo in columnas.items():
-            try:
-                conn.execute(text(f"ALTER TABLE agencias ADD COLUMN {nombre_col} {tipo}"))
-            except Exception:
-                pass
         try:
             conn.execute(
                 text("UPDATE agencias SET estado_pago = 'activo' WHERE estado_pago IS NULL")
@@ -297,12 +372,8 @@ def _migrar_columnas_autos():
         "fotos_json": "TEXT",
         "kilometros": "INTEGER",
     }
-    with engine.begin() as conn:
-        for nombre_col, tipo in columnas.items():
-            try:
-                conn.execute(text(f"ALTER TABLE autos ADD COLUMN {nombre_col} {tipo}"))
-            except Exception:
-                pass
+    for nombre_col, tipo in columnas.items():
+        _agregar_columna_si_falta("autos", nombre_col, tipo)
 
 
 def _migrar_columnas_citas():
@@ -310,18 +381,20 @@ def _migrar_columnas_citas():
         "estado": "VARCHAR(20)",
         "recordatorio_enviado": "BOOLEAN",
     }
+    for nombre_col, tipo in columnas.items():
+        _agregar_columna_si_falta("citas", nombre_col, tipo)
     with engine.begin() as conn:
-        for nombre_col, tipo in columnas.items():
-            try:
-                conn.execute(text(f"ALTER TABLE citas ADD COLUMN {nombre_col} {tipo}"))
-            except Exception:
-                pass
         try:
             conn.execute(
                 text("UPDATE citas SET estado = 'confirmada' WHERE estado IS NULL")
             )
+            # Postgres exige FALSE; SQLite acepta 0/FALSE.
+            literal_false = "FALSE" if es_postgres() else "0"
             conn.execute(
-                text("UPDATE citas SET recordatorio_enviado = 0 WHERE recordatorio_enviado IS NULL")
+                text(
+                    f"UPDATE citas SET recordatorio_enviado = {literal_false} "
+                    "WHERE recordatorio_enviado IS NULL"
+                )
             )
         except Exception:
             pass
@@ -346,13 +419,7 @@ def _migrar_tablas_auth():
 
 def _migrar_tabla_sucursales():
     Base.metadata.tables["sucursales"].create(bind=engine, checkfirst=True)
-    with engine.begin() as conn:
-        try:
-            conn.execute(
-                text("ALTER TABLE sucursales ADD COLUMN telefono_whatsapp VARCHAR(30)")
-            )
-        except Exception:
-            pass
+    _agregar_columna_si_falta("sucursales", "telefono_whatsapp", "VARCHAR(30)")
     db = SessionLocal()
     try:
         agencias = db.query(Agencia).all()
@@ -420,12 +487,8 @@ def _agregar_columnas_identidad_sucursales():
         "asesor_virtual_nombre": "VARCHAR(80)",
         "color_primario": "VARCHAR(20)",
     }
-    with engine.begin() as conn:
-        for nombre_col, tipo in columnas.items():
-            try:
-                conn.execute(text(f"ALTER TABLE sucursales ADD COLUMN {nombre_col} {tipo}"))
-            except Exception:
-                pass
+    for nombre_col, tipo in columnas.items():
+        _agregar_columna_si_falta("sucursales", nombre_col, tipo)
 
 
 def _migrar_backfill_identidad_sucursales():
@@ -453,17 +516,8 @@ def _migrar_backfill_identidad_sucursales():
 
 
 def _migrar_sucursal_en_entidades():
-    columnas = {
-        "autos": "sucursal_id INTEGER",
-        "prospectos_leads": "sucursal_id INTEGER",
-        "citas": "sucursal_id INTEGER",
-    }
-    with engine.begin() as conn:
-        for tabla, tipo in columnas.items():
-            try:
-                conn.execute(text(f"ALTER TABLE {tabla} ADD COLUMN sucursal_id {tipo}"))
-            except Exception:
-                pass
+    for tabla in ("autos", "prospectos_leads", "citas"):
+        _agregar_columna_si_falta(tabla, "sucursal_id", "INTEGER")
 
     db = SessionLocal()
     try:
@@ -517,16 +571,8 @@ def _migrar_tabla_vendedores():
 
 
 def _migrar_columnas_vendedor_en_entidades():
-    columnas = {
-        "prospectos_leads": "vendedor_id INTEGER",
-        "citas": "vendedor_id INTEGER",
-    }
-    with engine.begin() as conn:
-        for tabla, tipo in columnas.items():
-            try:
-                conn.execute(text(f"ALTER TABLE {tabla} ADD COLUMN vendedor_id {tipo}"))
-            except Exception:
-                pass
+    for tabla in ("prospectos_leads", "citas"):
+        _agregar_columna_si_falta(tabla, "vendedor_id", "INTEGER")
 
 
 def _sembrar_vendedor_principal():
@@ -629,11 +675,5 @@ def _migrar_columnas_leads():
         "usado_vtv_vigente": "VARCHAR(20)",
         "usado_es_titular": "VARCHAR(20)",
     }
-    with engine.begin() as conn:
-        for nombre_col, tipo in columnas.items():
-            try:
-                conn.execute(
-                    text(f"ALTER TABLE prospectos_leads ADD COLUMN {nombre_col} {tipo}")
-                )
-            except Exception:
-                pass
+    for nombre_col, tipo in columnas.items():
+        _agregar_columna_si_falta("prospectos_leads", nombre_col, tipo)

@@ -3,10 +3,12 @@ import shutil
 from pathlib import Path
 
 from models.database import HistorialConversacion, ProspectoLead, SessionLocal
+from paths_datos import static_dir
 
-BASE_DIR = Path(__file__).resolve().parent
-DIR_AUDIT_AUDIO = BASE_DIR / "static" / "audit" / "audio"
-DIR_TEMP_AUDIO = BASE_DIR / "static" / "temp" / "whatsapp"
+DIR_AUDIT_AUDIO = static_dir() / "audit" / "audio"
+DIR_TEMP_AUDIO = static_dir() / "temp" / "whatsapp"
+DIR_AUDIT_AUDIO.mkdir(parents=True, exist_ok=True)
+DIR_TEMP_AUDIO.mkdir(parents=True, exist_ok=True)
 
 
 def _resolver_cliente_id(agencia_id: int, telefono: str) -> int | None:
@@ -31,7 +33,7 @@ def _url_publica_desde_path(ruta: Path) -> str:
 
     base = os.getenv("DASHBOARD_BASE_URL", "http://127.0.0.1:8080").rstrip("/")
     try:
-        rel = ruta.resolve().relative_to((BASE_DIR / "static").resolve())
+        rel = ruta.resolve().relative_to(static_dir().resolve())
     except ValueError:
         rel = Path("audit") / "audio" / ruta.name
     return f"{base}/static/{rel.as_posix()}"

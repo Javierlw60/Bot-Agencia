@@ -1,77 +1,40 @@
 """
-
-
-
 Servidor web: dashboard + recordatorios + control de suscripción de agencias.
 
-
-
 Ejecutar: uvicorn app:app --reload --port 8080
-
-
-
 """
 
-
-
 from contextlib import asynccontextmanager
-
 from pathlib import Path
 
-
-
 from fastapi import FastAPI, Request
-
 from fastapi.responses import HTMLResponse, RedirectResponse
-
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-
-
 
 from api_bot import router as bot_router
 from api_mercadopago import router as mercadopago_router
 from api_whatsapp import router as whatsapp_router
-
 from auth.middleware import MiddlewareAutenticacion
 from auth.routes import router as auth_router
-from dashboard.routes import router as dashboard_router
 from dashboard.middleware_sucursal import MiddlewareSucursalActiva
-
+from dashboard.routes import router as dashboard_router
 from middleware_bot import MiddlewareAgenciaActiva
-
-from models.database import inicializar_base_de_datos
-
+from models.database import DATABASE_URL, es_postgres, es_sqlite, inicializar_base_de_datos
+from paths_datos import ensure_static_subdirs, static_dir
 from scheduler_tareas import detener_schedulers, iniciar_schedulers
-
-
 
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
-
-(BASE_DIR / "static" / "uploads").mkdir(parents=True, exist_ok=True)
-(BASE_DIR / "static" / "cache" / "tts").mkdir(parents=True, exist_ok=True)
-(BASE_DIR / "static" / "temp" / "whatsapp").mkdir(parents=True, exist_ok=True)
-(BASE_DIR / "static" / "audit" / "audio").mkdir(parents=True, exist_ok=True)
-
-
-
+_static_writable = ensure_static_subdirs()
 
 
 @asynccontextmanager
-
 async def lifespan(app: FastAPI):
-
     inicializar_base_de_datos()
-
     iniciar_schedulers()
-
     yield
-
     detener_schedulers()
-
-
-
 
 
 app = FastAPI(title="Bot Agencias Multi-Tenant", version="0.5.0", lifespan=lifespan)
@@ -80,44 +43,52 @@ app.add_middleware(MiddlewareAutenticacion)
 app.add_middleware(MiddlewareAgenciaActiva)
 app.add_middleware(MiddlewareSucursalActiva)
 
+# Uploads/caché pueden vivir en disco persistente (DATA_DIR); assets del repo en /static.
+app.mount(
+    "/static/uploads",
+    StaticFiles(directory=str(_static_writable / "uploads")),
+    name="static-uploads",
+)
+app.mount(
+    "/static/cache",
+    StaticFiles(directory=str(_static_writable / "cache")),
+    name="static-cache",
+)
+app.mount(
+    "/static/temp",
+    StaticFiles(directory=str(_static_writable / "temp")),
+    name="static-temp",
+)
+app.mount(
+    "/static/audit",
+    StaticFiles(directory=str(_static_writable / "audit")),
+    name="static-audit",
+)
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
 app.include_router(auth_router)
 app.include_router(dashboard_router)
-
 app.include_router(bot_router)
-
 app.include_router(mercadopago_router)
-
 app.include_router(whatsapp_router)
 
 
-
-
-
 @app.get("/")
-
 def inicio():
-
     return RedirectResponse(url="/auth/login", status_code=302)
 
 
-
-
-
 @app.get("/health")
-
 def health():
-
+    motor = "postgres" if es_postgres() else ("sqlite" if es_sqlite() else "otro")
+    destino = DATABASE_URL.split("@")[-1] if "@" in DATABASE_URL else DATABASE_URL
     return {
-
         "status": "ok",
-
         "dashboard": "/auth/login",
-
         "recordatorios": "activo",
-
         "suscripcion_cron": "activo",
+        "database": {"motor": motor, "destino": destino},
+        "static_writable": str(static_dir()),
         "mercadopago_webhook": "/api/mercadopago/webhook",
         "whatsapp_webhook": "/webhook",
         "whatsapp_webhook_legacy": "/webhook/whatsapp/{phone_number_id}",
@@ -126,7 +97,6 @@ def health():
             "terms": "/terms",
             "contacto": "/contacto",
         },
-
     }
 
 
@@ -200,5 +170,3 @@ async def pagina_contacto(request: Request):
             ),
         },
     )
-
-
