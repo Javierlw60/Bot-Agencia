@@ -1097,7 +1097,11 @@ def _contexto_sucursales(
 
 
 def _contexto_configuracion(db, request: Request, agencia: Agencia, sucursal_id: int | None) -> dict:
+    from inventory import asegurar_linea_bot_para_agencia
+
     _migrar_linea_bot_desde_equipo(db, agencia)
+    asegurar_linea_bot_para_agencia(db, agencia)
+    db.refresh(agencia)
     sucursales = _listar_sucursales(db, agencia.id)
     sucursal_activa = _resolver_sucursal_navegacion(request, db, agencia.id, sucursal_id)
     vendedores = _asegurar_vendedor_sucursal(db, sucursal_activa, agencia)
@@ -1110,6 +1114,8 @@ def _contexto_configuracion(db, request: Request, agencia: Agencia, sucursal_id:
         (modo, ETIQUETAS_MODO_RESPUESTA[modo]) for modo in sorted(MODOS_RESPUESTA_VALIDOS)
     ]
     ctx["modo_respuesta_actual"] = normalizar_modo_respuesta(agencia.modo_respuesta)
+    linea_actual = (agencia.whatsapp_phone_number_id or "").strip()
+    linea_es_placeholder = (not linea_actual) or linea_actual.startswith("reg_") or linea_actual.startswith("sin-linea")
     ctx.update(
         {
             "sucursales": sucursales,
@@ -1118,6 +1124,7 @@ def _contexto_configuracion(db, request: Request, agencia: Agencia, sucursal_id:
             "vendedor_activo": vendedor_activo,
             "vendedor_sin_celular": _vendedor_sin_celular(vendedor_activo),
             "agencia_sin_linea_bot": not _agencia_tiene_linea_bot(agencia),
+            "linea_bot_valor": "" if linea_es_placeholder else linea_actual,
             "nombre_comercial_actual": obtener_nombre_agencia_bot(
                 agencia, sucursal_activa
             ),
@@ -1962,7 +1969,15 @@ async def guardar_configuracion_agencia(
                 ),
                 status_code=303,
             )
-        if not es_phone_number_id_meta(linea_bot) and not linea_bot.startswith("reg_"):
+        if linea_bot.startswith("reg_") or linea_bot.startswith("sin-linea"):
+            return RedirectResponse(
+                url=(
+                    f"/dashboard/{agencia_id}/configuracion"
+                    f"?sucursal={sucursal_id}&error=linea_bot_placeholder"
+                ),
+                status_code=303,
+            )
+        if not es_phone_number_id_meta(linea_bot):
             return RedirectResponse(
                 url=(
                     f"/dashboard/{agencia_id}/configuracion"
@@ -2139,9 +2154,30 @@ async def guardar_vendedor(
 
         tel = _normalizar_telefono(telefono_whatsapp)
         if tel:
+            # Si pegaron el Phone Number ID del bot en el vendedor, lo movemos
+            # a la agencia (donde corresponde) en vez de solo mostrar error.
             if es_phone_number_id_meta(tel) or _normalizar_telefono(
                 agencia.whatsapp_phone_number_id
             ) == tel:
+                from inventory import (
+                    agencia_tiene_linea_placeholder,
+                    promover_phone_id_a_agencia,
+                )
+
+                misma_linea = _normalizar_telefono(agencia.whatsapp_phone_number_id) == tel
+                if agencia_tiene_linea_placeholder(agencia) or misma_linea:
+                    promover_phone_id_a_agencia(db, agencia, tel)
+                    vendedor.nombre = nombre.strip() or vendedor.nombre
+                    vendedor.telefono_whatsapp = f"sin-linea-{vendedor.id}"
+                    db.commit()
+                    return RedirectResponse(
+                        url=(
+                            f"/dashboard/{agencia_id}/configuracion"
+                            f"?sucursal={sucursal.id}&vendedor={vendedor.id}"
+                            f"&ok=linea_bot_movida"
+                        ),
+                        status_code=303,
+                    )
                 return RedirectResponse(
                     url=(
                         f"/dashboard/{agencia_id}/configuracion"

@@ -76,6 +76,8 @@
 <div class="ui-card mb-3 px-4 py-2.5 text-sm" style="color: #6ee7b7;">Cambios guardados correctamente.</div>
 {% elif _ok == 'agencia' %}
 <div class="ui-card mb-3 px-4 py-2.5 text-sm" style="color: #6ee7b7;">Datos de la agencia guardados. El bot usa esta línea de WhatsApp Business.</div>
+{% elif _ok == 'linea_bot_movida' %}
+<div class="ui-card mb-3 px-4 py-2.5 text-sm" style="color: #6ee7b7;">Ese valor era el Phone Number ID del bot: lo guardamos en «Datos de la agencia». En el vendedor dejá el celular real (549…) o vacío.</div>
 {% elif _ok == 'sucursal' %}
 <div class="ui-card mb-3 px-4 py-2.5 text-sm" style="color: #6ee7b7;">Nueva sucursal creada.</div>
 {% elif _ok == 'vendedor' %}
@@ -85,15 +87,17 @@
 {% elif _err == 'telefono_duplicado' %}
 <div class="ui-card mb-3 px-4 py-2.5 text-sm" style="color: #fca5a5;">Ese celular ya está en uso por otro vendedor.</div>
 {% elif _err == 'telefono_es_linea_bot' %}
-<div class="ui-card mb-3 px-4 py-2.5 text-sm" style="color: #fca5a5;">Ese valor es el Phone Number ID del bot. Ponelo en «Datos de la agencia» y acá usá el celular real del vendedor (ej. 54911…).</div>
+<div class="ui-card mb-3 px-4 py-2.5 text-sm" style="color: #fca5a5;">Ese valor es el Phone Number ID del bot. Ponelo arriba en «1. Datos de la agencia» y acá usá el celular real del vendedor (ej. 54911…).</div>
 {% elif _err == 'telefono_invalido' %}
 <div class="ui-card mb-3 px-4 py-2.5 text-sm" style="color: #fca5a5;">Ingresá un celular válido con código de país (ej. 5491163052331) o dejalo vacío.</div>
 {% elif _err == 'linea_bot_duplicada' %}
 <div class="ui-card mb-3 px-4 py-2.5 text-sm" style="color: #fca5a5;">Ese Phone Number ID ya está en uso por otra agencia.</div>
 {% elif _err == 'linea_bot_vacia' %}
 <div class="ui-card mb-3 px-4 py-2.5 text-sm" style="color: #fca5a5;">El Phone Number ID de WhatsApp es obligatorio.</div>
+{% elif _err == 'linea_bot_placeholder' %}
+<div class="ui-card mb-3 px-4 py-2.5 text-sm" style="color: #fca5a5;">Todavía figura un ID temporal (reg_…). Pegá el Phone Number ID real de Meta (WhatsApp → API Setup).</div>
 {% elif _err == 'linea_bot_invalida' %}
-<div class="ui-card mb-3 px-4 py-2.5 text-sm" style="color: #fca5a5;">Ingresá el Phone Number ID de Meta (no un celular 549…).</div>
+<div class="ui-card mb-3 px-4 py-2.5 text-sm" style="color: #fca5a5;">Ingresá el Phone Number ID de Meta (solo números largos, no un celular 549…).</div>
 {% elif _err == 'contacto_es_linea_bot' %}
 <div class="ui-card mb-3 px-4 py-2.5 text-sm" style="color: #fca5a5;">«Teléfono de contacto» debe ser un teléfono real (ej. 11 4567-8900), no el Phone Number ID de Meta. Ese ID va solo en el campo de la línea del bot.</div>
 {% elif _err == 'ultimo_vendedor' %}
@@ -106,7 +110,8 @@
   <div>
     <p class="text-sm font-semibold" style="color: var(--title);">Falta la línea del bot</p>
     <p class="mt-0.5 text-sm" style="color: var(--muted);">
-      Pegá el <strong style="color: var(--title);">Phone Number ID</strong> de Meta en «Datos de la agencia» para que WhatsApp llegue al bot.
+      En Meta → WhatsApp → API Setup copiá el <strong style="color: var(--title);">Phone number ID</strong>
+      y pegalo solo en el campo de abajo (sección 1). No va en el vendedor.
     </p>
   </div>
   <a href="#form-agencia"
@@ -122,10 +127,9 @@
         id="form-agencia" class="ui-card js-save-form flex flex-col gap-3 p-4 sm:p-5" novalidate>
     <input type="hidden" name="sucursal_id" value="{{ sucursal_activa.id }}">
     <div>
-      <h2 class="text-base font-semibold" style="color: var(--title);">1. Datos de la agencia (bot)</h2>
+      <h2 class="text-base font-semibold" style="color: var(--title);">1. Agencia y línea del bot</h2>
       <p class="mt-0.5 text-sm" style="color: var(--muted);">
-        Acá va el Phone Number ID de Meta, el nombre del bot y la dirección oficial.
-        Los vendedores se cargan más abajo y no atienden esta línea.
+        El bot atiende WhatsApp Business con este Phone Number ID. Nombre, dirección y asesor virtual también van acá.
       </p>
     </div>
     <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -140,17 +144,21 @@
         <input name="direccion_agencia" value="{{ agencia.direccion or sucursal_activa.direccion or '' }}"
                placeholder="Ej: Roma 751, Garín" class="ui-input">
       </label>
-      <label class="block">
+      <label class="block sm:col-span-2">
         <span class="ui-label">Phone Number ID de WhatsApp (línea del bot) *</span>
         <input name="whatsapp_phone_number_id" required inputmode="numeric"
-               value="{{ agencia.whatsapp_phone_number_id or '' }}"
-               placeholder="Ej: 1157912357408413" class="ui-input">
+               value="{{ linea_bot_valor }}"
+               placeholder="Pegá acá el ID de Meta (ej. 1157912357408413)" class="ui-input"
+               autocomplete="off">
+        <span class="mt-1 block text-xs" style="color: var(--muted);">
+          Solo números largos de Meta. No uses el celular del vendedor ni un 549…
+        </span>
       </label>
       <label class="block">
-        <span class="ui-label">Teléfono de contacto de la agencia</span>
+        <span class="ui-label">Teléfono de contacto (humano)</span>
         <input name="telefono_contacto" inputmode="tel"
                value="{{ agencia.telefono_contacto or '' }}"
-               placeholder="Ej: 11 4567-8900 (NO el Phone Number ID)" class="ui-input">
+               placeholder="Ej: 11 4567-8900" class="ui-input">
       </label>
       <label class="block">
         <span class="ui-label">Asesor virtual (nombre del bot)</span>
@@ -375,13 +383,14 @@
              placeholder="Ej: Juan Pérez" class="ui-input">
     </label>
     <label class="block">
-      <span class="ui-label">Celular personal</span>
+      <span class="ui-label">Celular del vendedor (549…)</span>
       <input name="telefono_whatsapp" inputmode="tel" value="{{ _tel_v }}"
-             placeholder="Ej: 5491163052331 (opcional)" class="ui-input">
+             placeholder="Ej: 5491163052331 — opcional" class="ui-input"
+             autocomplete="tel">
     </label>
   </div>
   <p class="-mt-1 text-xs" style="color: var(--muted);">
-    Celular real para contacto interno o avisos de citas. No pegues acá el Phone Number ID de Meta.
+    Solo celular personal con 54. Si pegás el Phone Number ID de Meta acá, el sistema lo mueve solo a la agencia.
   </p>
 
   <button type="submit" id="btn-guardar" class="btn-primary mt-1 w-full py-2.5 sm:w-auto sm:self-start sm:px-6" data-saving-text="Guardando...">
