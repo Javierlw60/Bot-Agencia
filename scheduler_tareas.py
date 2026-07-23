@@ -4,6 +4,11 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
+from keepalive import (
+    ejecutar_keepalive,
+    intervalo_keepalive_minutos,
+    keepalive_habilitado,
+)
 from recordatorios import procesar_recordatorios_pendientes
 from suscripcion_agencias import procesar_vencimientos_vencidos
 
@@ -26,6 +31,13 @@ def _ejecutar_vencimientos() -> None:
         print(f"[SUSCRIPCIÓN] Error en cron de vencimientos: {exc}")
 
 
+def _ejecutar_keepalive() -> None:
+    try:
+        ejecutar_keepalive()
+    except Exception as exc:
+        print(f"[KEEPALIVE] Error inesperado: {exc}")
+
+
 def iniciar_schedulers() -> BackgroundScheduler | None:
     global _scheduler
 
@@ -35,8 +47,9 @@ def iniciar_schedulers() -> BackgroundScheduler | None:
     vencimientos_on = os.getenv("VENCIMIENTOS_CRON_ACTIVO", "true").lower() not in {
         "0", "false", "no",
     }
+    keepalive_on = keepalive_habilitado()
 
-    if not recordatorios_on and not vencimientos_on:
+    if not recordatorios_on and not vencimientos_on and not keepalive_on:
         print("[SCHEDULER] Todas las tareas de fondo están desactivadas.")
         return None
 
@@ -71,6 +84,20 @@ def iniciar_schedulers() -> BackgroundScheduler | None:
         print(f"[SUSCRIPCIÓN] Cron diario de vencimientos — {hora:02d}:{minuto:02d} hs.")
 
         _ejecutar_vencimientos()
+
+    if keepalive_on:
+        intervalo_ka = intervalo_keepalive_minutos()
+        _scheduler.add_job(
+            _ejecutar_keepalive,
+            trigger=IntervalTrigger(minutes=intervalo_ka),
+            id="keepalive_health",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        print(f"[KEEPALIVE] Activo — ping /health cada {intervalo_ka} min.")
+        # Primer ping al arrancar (no bloquea el scheduler).
+        _ejecutar_keepalive()
 
     _scheduler.start()
     return _scheduler

@@ -25,7 +25,17 @@ load_dotenv()
 OPENAI_API_BASE = "https://api.openai.com/v1"
 STT_MOTOR = os.getenv("STT_MOTOR", "auto").strip().lower()
 STT_IDIOMA = os.getenv("STT_IDIOMA", "es")
-STT_GEMINI_MODELO = os.getenv("STT_GEMINI_MODELO", "gemini-2.0-flash").strip()
+# gemini-2.0-flash fue retirado (404 desde jun 2026). Default alineado con el chat del bot.
+STT_GEMINI_MODELO = os.getenv("STT_GEMINI_MODELO", "gemini-2.5-flash").strip()
+# Si el modelo principal falla con 404/NOT_FOUND, se prueban estos en orden.
+_STT_GEMINI_FALLBACKS = [
+    m.strip()
+    for m in os.getenv(
+        "STT_GEMINI_FALLBACKS",
+        "gemini-2.5-flash,gemini-2.5-flash-lite,gemini-3.1-flash-lite,gemini-3.5-flash",
+    ).split(",")
+    if m.strip()
+]
 
 
 class SpeechToTextError(Exception):
@@ -116,6 +126,29 @@ def _transcribir_openai(archivo: Path) -> str:
     return texto
 
 
+def _modelos_gemini_stt() -> list[str]:
+    orden: list[str] = []
+    for modelo in [STT_GEMINI_MODELO, *_STT_GEMINI_FALLBACKS]:
+        if modelo and modelo not in orden:
+            orden.append(modelo)
+    return orden
+
+
+def _es_error_modelo_inexistente(exc: Exception) -> bool:
+    texto = str(exc).lower()
+    return any(
+        marca in texto
+        for marca in (
+            "404",
+            "not_found",
+            "not found",
+            "no longer available",
+            "is not found",
+            "model not found",
+        )
+    )
+
+
 def _transcribir_gemini(archivo: Path) -> str:
     try:
         from google import genai
@@ -134,21 +167,33 @@ def _transcribir_gemini(archivo: Path) -> str:
         "sin comentarios ni puntuación inventada de más. "
         f"Idioma esperado: {STT_IDIOMA}."
     )
-    try:
-        respuesta = client.models.generate_content(
-            model=STT_GEMINI_MODELO,
-            contents=[
-                prompt,
-                types.Part.from_bytes(data=audio_bytes, mime_type=_mime_audio(archivo)),
-            ],
-        )
-    except Exception as exc:
-        raise SpeechToTextError(f"Gemini STT falló: {exc}") from exc
+    errores: list[str] = []
+    for modelo in _modelos_gemini_stt():
+        try:
+            respuesta = client.models.generate_content(
+                model=modelo,
+                contents=[
+                    prompt,
+                    types.Part.from_bytes(data=audio_bytes, mime_type=_mime_audio(archivo)),
+                ],
+            )
+        except Exception as exc:
+            errores.append(f"{modelo}: {exc}")
+            if _es_error_modelo_inexistente(exc):
+                print(f"[STT] Modelo Gemini no disponible ({modelo}), probando otro…")
+                continue
+            raise SpeechToTextError(f"Gemini STT falló: {exc}") from exc
 
-    texto = (getattr(respuesta, "text", None) or "").strip()
-    if not texto:
-        raise SpeechToTextError("Gemini no devolvió texto en la transcripción.")
-    return texto
+        texto = (getattr(respuesta, "text", None) or "").strip()
+        if not texto:
+            errores.append(f"{modelo}: sin texto")
+            continue
+        if modelo != STT_GEMINI_MODELO:
+            print(f"[STT] Gemini OK con modelo fallback={modelo}")
+        return texto
+
+    detalle = " | ".join(errores) if errores else "sin detalle"
+    raise SpeechToTextError(f"Gemini STT falló con todos los modelos: {detalle}")
 
 
 def _transcribir_local(archivo: Path) -> str:

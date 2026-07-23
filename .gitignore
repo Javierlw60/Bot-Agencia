@@ -6,3 +6,5 @@ Scripts/
 Lib/
 Include/
 pyvenv.cfg
+node_modules/
+npm-debug.log*

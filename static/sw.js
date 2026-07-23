@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'ba-panel-v1';
+const CACHE_VERSION = 'ba-panel-v2';
 const SHELL_CACHE = CACHE_VERSION + '-shell';
 const PAGES_CACHE = CACHE_VERSION + '-pages';
 
@@ -6,6 +6,7 @@ const PRECACHE_URLS = [
   '/static/offline.html',
   '/static/js/dashboard-ui.js',
   '/static/js/pwa.js',
+  '/static/css/dashboard.css',
   '/static/icons/icon.svg',
   '/static/icons/maskable.svg',
   '/static/manifest.json',

@@ -120,9 +120,28 @@
     marcarGuardando: marcarGuardando,
   };
 
+  function initNavProgress() {
+    if (document.getElementById('nav-progress')) return;
+    const bar = document.createElement('div');
+    bar.id = 'nav-progress';
+    bar.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(bar);
+
+    document.addEventListener('click', function (e) {
+      const link = e.target.closest('a[href]');
+      if (!link) return;
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const href = link.getAttribute('href') || '';
+      if (!href.startsWith('/dashboard/')) return;
+      if (link.target === '_blank') return;
+      bar.classList.add('nav-progress-active');
+    });
+  }
+
   document.addEventListener('DOMContentLoaded', function () {
     initFriendlyValidation();
     initSaveForms();
     initToastFromQuery();
+    initNavProgress();
   });
 })();
