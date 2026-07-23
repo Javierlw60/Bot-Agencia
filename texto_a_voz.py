@@ -25,8 +25,12 @@ MAX_CARACTERES_TTS = int(os.getenv("TTS_MAX_CARACTERES", "1500"))
 
 
 def _normalizar_texto_tts(texto: str) -> str:
+    from formato_hora import expandir_horas_para_tts
+
     limpio = re.sub(r"https?://\S+", "", texto)
     limpio = re.sub(r"\s+", " ", limpio).strip()
+    # 14:00 → "catorce horas" para que el audio no suene a "las dos".
+    limpio = expandir_horas_para_tts(limpio)
     if len(limpio) > MAX_CARACTERES_TTS:
         limpio = limpio[: MAX_CARACTERES_TTS - 3].rstrip() + "..."
     return limpio

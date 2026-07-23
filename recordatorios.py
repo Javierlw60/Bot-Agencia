@@ -52,8 +52,11 @@ def formatear_mensaje_recordatorio(
     telefono_agencia: str,
     nombre_agencia: str,
 ) -> str:
+    from formato_hora import formatear_hora_24h
+
+    hora_txt = formatear_hora_24h(hora_cita)
     return (
-        f"¡Hola {nombre_cliente}! Te esperamos hoy a las {hora_cita} para ver el {auto}. "
+        f"¡Hola {nombre_cliente}! Te esperamos hoy a las {hora_txt} hs para ver el {auto}. "
         f"Recordá que lo tenemos reservado para tu visita. "
         f"Estamos en {direccion_agencia}. "
         f"Cualquier cosa nos avisás al {telefono_agencia}. "

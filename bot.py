@@ -694,7 +694,9 @@ def _respuesta_rapida_reprogramacion(
     dia = _DIAS_ES[fecha_cita.weekday()]
     mes = _MESES_ES[fecha_cita.month - 1]
     fecha_txt = f"{dia} {fecha_cita.day} de {mes}"
-    hora_txt = hora_cita.strftime("%H:%M")
+    from formato_hora import formatear_hora_24h
+
+    hora_txt = formatear_hora_24h(hora_cita)
 
     sucursal = _sucursal_sesion_bot(sesion)
     direccion = obtener_direccion_bot(agencia, sucursal)
