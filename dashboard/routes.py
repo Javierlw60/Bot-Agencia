@@ -8,7 +8,6 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import and_, func, or_
-from sqlalchemy.dialects import sqlite as sqlite_dialect
 from sqlalchemy.orm import joinedload
 
 from dashboard.import_stock import importar_csv
@@ -48,12 +47,14 @@ from models.database import (
     SessionLocal,
     Sucursal,
     Vendedor,
+    engine,
 )
 from modo_respuesta import (
     ETIQUETAS_MODO_RESPUESTA,
     MODOS_RESPUESTA_VALIDOS,
     normalizar_modo_respuesta,
 )
+from paths_datos import static_dir
 from personalizacion_bot import (
     NOMBRE_AGENCIA_DEFAULT,
     NOMBRE_BOT_DEFAULT,
@@ -73,6 +74,10 @@ logger_estadisticas = logging.getLogger("dashboard.estadisticas")
 
 EXTENSIONES_IMAGEN = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 _CLAVE_SIN_ASIGNAR = 0
+
+
+def _static_base() -> Path:
+    return static_dir()
 
 
 def _obtener_agencia(db, agencia_id: int) -> Agencia:
@@ -270,7 +275,7 @@ def _sql_compilado(query) -> str:
     try:
         return str(
             query.statement.compile(
-                dialect=sqlite_dialect.dialect(),
+                dialect=engine.dialect,
                 compile_kwargs={"literal_binds": True},
             )
         )
@@ -1132,7 +1137,7 @@ async def _guardar_logo_agencia(agencia: Agencia, archivo_logo: UploadFile) -> s
     extension = Path(archivo_logo.filename).suffix.lower()
     if extension not in EXTENSIONES_IMAGEN:
         return None
-    destino = BASE_DIR / "static" / "uploads" / f"agencia_{agencia.id}"
+    destino = _static_base() / "uploads" / f"agencia_{agencia.id}"
     destino.mkdir(parents=True, exist_ok=True)
     nombre_archivo = f"logo{extension}"
     ruta = destino / nombre_archivo
@@ -1629,7 +1634,7 @@ async def formulario_editar_auto(request: Request, agencia_id: int, auto_id: int
         )
         if not auto:
             raise HTTPException(status_code=404, detail="Vehículo no encontrado")
-        fotos = sincronizar_fotos_auto(auto, BASE_DIR / "static")
+        fotos = sincronizar_fotos_auto(auto, _static_base())
         db.commit()
         ctx = _contexto_dashboard(request, db, agencia, "inventario")
         ctx.update({
@@ -1723,7 +1728,7 @@ async def subir_fotos(
         if not archivos:
             raise HTTPException(status_code=400, detail="No se recibieron archivos")
 
-        destino = directorio_upload(agencia_id, auto_id, BASE_DIR / "static")
+        destino = directorio_upload(agencia_id, auto_id, _static_base())
         subidas = 0
         errores: list[str] = []
 
@@ -2216,7 +2221,7 @@ async def _guardar_logo_vendedor(
     extension = Path(archivo_logo.filename).suffix.lower()
     if extension not in EXTENSIONES_IMAGEN:
         return None
-    destino = BASE_DIR / "static" / "uploads" / f"agencia_{agencia_id}"
+    destino = _static_base() / "uploads" / f"agencia_{agencia_id}"
     destino.mkdir(parents=True, exist_ok=True)
     nombre_archivo = f"vendedor_{vendedor.id}{extension}"
     ruta = destino / nombre_archivo

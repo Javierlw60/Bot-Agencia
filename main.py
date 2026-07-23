@@ -81,9 +81,12 @@ def inyectar_datos_semilla():
 
 
 if __name__ == "__main__":
+    from models.database import DATABASE_URL, es_postgres
+
     inicializar_base_de_datos()
     inyectar_datos_semilla()
-    print("[OK] Base de datos SQLite local inicializada.")
+    motor = "Postgres" if es_postgres() else "SQLite"
+    print(f"[OK] Base de datos {motor} inicializada ({DATABASE_URL.split('@')[-1]}).")
 
     inventario = obtener_inventario_agencia(1)
     print("\n[INVENTARIO ENCONTRADO EN BD]:\n", inventario)

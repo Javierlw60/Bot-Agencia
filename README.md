@@ -23,7 +23,7 @@ Sistema web para agencias automotrices que combina un **dashboard de gestión mu
 ### Bot comercial (WhatsApp + Gemini)
 
 - **WhatsApp Cloud API (Meta):** recepción y envío de mensajes reales vía Graph API, con webhook estándar en `GET/POST /webhook`.
-- **Enrutamiento por vendedor:** los mensajes entrantes se asocian al vendedor/sucursal según el **Phone Number ID** de Meta configurado en cada línea.
+- **Enrutamiento por agencia:** los mensajes entrantes se asocian a la agencia según el **Phone Number ID** de Meta configurado en Datos de la agencia.
 - **Google Gemini:** motor conversacional que consulta el inventario en tiempo real, califica leads, gestiona permutas y agenda visitas respetando horarios comerciales y contexto temporal (incluye reglas para madrugada en Argentina).
 - **Multimedia:** soporte de mensajes de **texto** y **audio** (transcripción STT + respuesta TTS con voces neurales en español).
 - **Recordatorios automáticos** de citas mediante scheduler en segundo plano.
@@ -54,6 +54,17 @@ Copiá `.env.example` a `.env` en la raíz del proyecto. **No subas `.env` a Git
 | `AUTH_SECRET_KEY` | Clave secreta para sesiones del panel (se genera sola al instalar) |
 | `GEMINI_API_KEY` | Clave de la API de Google Gemini |
 | `DASHBOARD_BASE_URL` | URL pública del panel (ej. `http://127.0.0.1:8080` en local) |
+
+### Persistencia en producción (Render)
+
+En Render el disco del servicio es **efímero**: un redeploy borra SQLite local y las fotos en `static/uploads`.
+
+| Variable | Descripción |
+|----------|-------------|
+| `DATABASE_URL` | **Obligatoria en producción.** URI de Postgres (Supabase → Settings → Database). Preferí el **pooler** (puerto `6543`). |
+| `DATA_DIR` | Ruta de un **Persistent Disk** de Render (ej. `/var/data`) para fotos, TTS y temporales. |
+
+Sin `DATABASE_URL`, en local se usa SQLite (`bot_agencias_multitenant.db`).
 
 ### WhatsApp Cloud API (producción)
 
