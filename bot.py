@@ -13,6 +13,7 @@ from google.genai import errors as genai_errors
 from google.genai import types
 
 from citas import (
+    detectar_visita,
     es_horario_madrugada,
     obtener_ahora_argentina,
     obtener_fecha_hoy_argentina,
@@ -22,7 +23,9 @@ from conversaciones import guardar_mensaje, vincular_mensajes_a_lead
 from suscripcion_agencias import evaluar_agencia_para_operar
 from inventory import (
     buscar_autos_por_texto,
+    cliente_en_cierre_sin_fotos,
     cliente_pide_fotos,
+    cliente_pide_mas_fotos,
     formatear_fotos_para_whatsapp,
     formatear_opciones_stock_cruzado,
     guardar_lead_comercial,
@@ -172,6 +175,8 @@ class SesionCliente:
     vendedor_origen_id: int | None = None
     line_whatsapp_id: str | None = None
     cuota_diaria_agotada: bool = False
+    # Autos a los que ya se les envió el álbum en esta conversación (anti-loop).
+    autos_con_fotos_enviadas: set[int] = field(default_factory=set)
     historial: list[str] = field(default_factory=list)
 
 
@@ -1033,15 +1038,28 @@ def _procesar_mensaje(
 
     auto_fotos = None
     enviar_fotos = False
-    if cliente_pide_fotos(texto) and sesion.auto_interes_id:
-        auto_fotos = obtener_auto_por_id(sesion.agencia_id, sesion.auto_interes_id)
-        if auto_fotos and listar_origenes_fotos_auto(auto_fotos):
-            enviar_fotos = True
-            if not respuesta_bot.strip():
-                respuesta_bot = (
-                    f"¡Dale! Te mando las fotos del "
-                    f"{auto_fotos.marca} {auto_fotos.modelo} {auto_fotos.ano}."
-                )
+    if (
+        sesion.auto_interes_id
+        and cliente_pide_fotos(texto)
+        and not cliente_en_cierre_sin_fotos(texto)
+        and not detectar_visita(texto, sesion.historial)
+    ):
+        ya_enviadas = sesion.auto_interes_id in sesion.autos_con_fotos_enviadas
+        if ya_enviadas and not cliente_pide_mas_fotos(texto):
+            # Evita el loop: "me mandaste fotos → sigo charlando → te mando todo de nuevo".
+            logger.info(
+                "[FOTOS] Omitido reenvío auto_id=%s (ya enviadas en esta sesión)",
+                sesion.auto_interes_id,
+            )
+        else:
+            auto_fotos = obtener_auto_por_id(sesion.agencia_id, sesion.auto_interes_id)
+            if auto_fotos and listar_origenes_fotos_auto(auto_fotos):
+                enviar_fotos = True
+                if not respuesta_bot.strip():
+                    respuesta_bot = (
+                        f"¡Dale! Te mando las fotos del "
+                        f"{auto_fotos.marca} {auto_fotos.modelo} {auto_fotos.ano}."
+                    )
 
     _entregar_respuesta_whatsapp(
         agencia, sesion.telefono, respuesta_bot, via_whatsapp=via_whatsapp, sesion=sesion
@@ -1051,6 +1069,8 @@ def _procesar_mensaje(
         enviadas = _enviar_fotos_auto_whatsapp(
             agencia, sesion.telefono, auto_fotos, sesion=sesion
         )
+        if enviadas > 0:
+            sesion.autos_con_fotos_enviadas.add(auto_fotos.id)
         if enviadas == 0:
             bloque_fotos = formatear_fotos_para_whatsapp(
                 auto_fotos, base_url=_base_url_publica()
@@ -1063,6 +1083,7 @@ def _procesar_mensaje(
                     via_whatsapp=via_whatsapp,
                     sesion=sesion,
                 )
+                sesion.autos_con_fotos_enviadas.add(auto_fotos.id)
 
     return respuesta_bot
 

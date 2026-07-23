@@ -613,16 +613,53 @@ def obtener_auto_por_id(agencia_id: int, auto_id: int) -> Auto | None:
         db.close()
 
 
+# Pedido EXPLÍCITO de fotos (no confundir con "quiero ver el auto" / "mandame turno").
 _PATRON_PEDIDO_FOTOS = re.compile(
-    r"\b(foto|fotos|imagen|imagenes|imágenes|fotito|fotitos|"
-    r"mostrame|mostrá|mandame|mandá|enviame|enviá|ver\s+(el\s+)?auto|"
-    r"quiero\s+ver|me\s+mostras|me\s+mostrás)\b",
+    r"(?:"
+    r"\b(foto|fotos|fotito|fotitos|imagen|imagenes|imágenes)\b"
+    r"|"
+    r"\b(mostrame|mostrá|mostras|mostrás|mandame|mandá|enviame|enviá|pasame|pasá)\b"
+    r".{0,48}\b(foto|fotos|fotito|fotitos|imagen|imagenes|imágenes)\b"
+    r"|"
+    r"\b(foto|fotos|fotito|fotitos|imagen|imagenes|imágenes)\b"
+    r".{0,48}\b(mostrame|mostrá|mostras|mostrás|mandame|mandá|enviame|enviá|pasame|pasá)\b"
+    r")",
+    re.IGNORECASE,
+)
+
+_PATRON_MAS_FOTOS = re.compile(
+    r"\b(mas|más|otras?|nuevas?|siguen|seguime|todas)\b.{0,24}\b(foto|fotos|fotito|fotitos)\b"
+    r"|"
+    r"\b(foto|fotos)\b.{0,24}\b(mas|más|otras?|nuevas?)\b",
+    re.IGNORECASE,
+)
+
+_PATRON_CIERRE_SIN_FOTOS = re.compile(
+    r"\b("
+    r"me\s+gusta|me\s+interesa|lo\s+quiero|la\s+quiero|"
+    r"agendar|agenda(r|me)?|turno|cita|visita|"
+    r"pasame\s+la\s+direcci[oó]n|direcci[oó]n|"
+    r"quiero\s+(ir|pasar|reservar|agendar)|"
+    r"voy\s+(a\s+)?(ver|pasar|ir)|"
+    r"cerramos|se[ñn]a|seña|reserva"
+    r")\b",
     re.IGNORECASE,
 )
 
 
 def cliente_pide_fotos(texto: str) -> bool:
-    return bool(_PATRON_PEDIDO_FOTOS.search(texto))
+    """True solo si pide fotos de forma explícita."""
+    return bool(_PATRON_PEDIDO_FOTOS.search(texto or ""))
+
+
+def cliente_pide_mas_fotos(texto: str) -> bool:
+    """True si pide otra tanda / más fotos (después de ya haber recibido)."""
+    return bool(_PATRON_MAS_FOTOS.search(texto or ""))
+
+
+def cliente_en_cierre_sin_fotos(texto: str) -> bool:
+    """True si el mensaje apunta a gustar/agendar/visitar: no reenviar álbum."""
+    return bool(_PATRON_CIERRE_SIN_FOTOS.search(texto or ""))
 
 
 _MAX_FOTOS_WHATSAPP = 8
