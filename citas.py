@@ -194,51 +194,61 @@ def _hora_desde_token(token: str) -> int | None:
 
 def _extraer_hora_explicita(texto_norm: str, *, solo_confirmacion: bool = False) -> datetime.time | None:
     """
-    Extrae la hora de la cita.
+    Extrae la hora de la cita en 24h.
 
-    Prioriza 'a las 10' / 'para las 10:00' / 'para las catorce'.
+    Prioriza 'a las 14', 'para las 10:00', 'para las catorce', '2pm', '2 de la tarde'.
     Ignora franjas de atención (09:00-13:00) y '1 hora antes'.
     """
-    token_hora = r"(\d{1,2}|" + "|".join(sorted(HORAS_EN_PALABRAS.keys(), key=len, reverse=True)) + r")"
+    from formato_hora import interpretar_hora_12h_si_aplica
 
-    # 1) Confirmaciones explícitas: "a las 10", "para las catorce", "tipo 10"
+    token_hora = r"(\d{1,2}|" + "|".join(sorted(HORAS_EN_PALABRAS.keys(), key=len, reverse=True)) + r")"
+    sufijo_ampm = r"(?:\s*(a\.?\s*m\.?|p\.?\s*m\.?|am|pm))?"
+
+    def _armar(horas_tok: str, minutos_tok: str | None, sufijo: str | None) -> datetime.time | None:
+        horas = _hora_desde_token(horas_tok)
+        if horas is None:
+            return None
+        minutos = int(minutos_tok or 0)
+        return interpretar_hora_12h_si_aplica(horas, minutos, sufijo, texto_norm)
+
+    # 0) 2pm / 2 p.m. / 2am (sin "a las")
     for match in re.finditer(
-        rf"(?:a las?|para las?|tipo)\s*{token_hora}(?::(\d{{2}}))?",
+        rf"\b(\d{{1,2}})(?::(\d{{2}}))?\s*(a\.?\s*m\.?|p\.?\s*m\.?|am|pm)\b",
+        texto_norm,
+    ):
+        hora = _armar(match.group(1), match.group(2), match.group(3))
+        if hora:
+            return hora
+
+    # 1) Confirmaciones explícitas: "a las 10", "para las catorce", "tipo 10", "a las 2pm"
+    for match in re.finditer(
+        rf"(?:a las?|para las?|tipo)\s*{token_hora}(?::(\d{{2}}))?{sufijo_ampm}",
         texto_norm,
     ):
         if _es_recordatorio_antes(texto_norm, match.start(1)):
             continue
-        horas = _hora_desde_token(match.group(1))
-        if horas is None:
-            continue
-        minutos = int(match.group(2) or 0)
-        if 0 <= horas <= 23 and 0 <= minutos <= 59:
-            return datetime.time(horas, minutos)
+        hora = _armar(match.group(1), match.group(2), match.group(3) if match.lastindex and match.lastindex >= 3 else None)
+        if hora:
+            return hora
 
     if solo_confirmacion:
         for match in re.finditer(
             rf"(?:te esperamos|quedamos|quedo|qued[oó]|confirmad[oa]|cita|"
             rf"reprogram|cambiamos|pasamos|la dejamos|la dej[eé])\b.{{0,100}}?"
-            rf"(?:a las?|para las?)\s*{token_hora}(?::(\d{{2}}))?",
+            rf"(?:a las?|para las?)\s*{token_hora}(?::(\d{{2}}))?{sufijo_ampm}",
             texto_norm,
         ):
-            horas = _hora_desde_token(match.group(1))
-            if horas is None:
-                continue
-            minutos = int(match.group(2) or 0)
-            if 0 <= horas <= 23 and 0 <= minutos <= 59:
-                return datetime.time(horas, minutos)
+            hora = _armar(match.group(1), match.group(2), match.group(3) if match.lastindex and match.lastindex >= 3 else None)
+            if hora:
+                return hora
         if re.search(r"\b(te esperamos|quedamos|cita|reprogram|cambiamos)\b", texto_norm):
             for match in re.finditer(
-                rf"(?:a las?|para las?)\s*{token_hora}(?::(\d{{2}}))?",
+                rf"(?:a las?|para las?)\s*{token_hora}(?::(\d{{2}}))?{sufijo_ampm}",
                 texto_norm,
             ):
-                horas = _hora_desde_token(match.group(1))
-                if horas is None:
-                    continue
-                minutos = int(match.group(2) or 0)
-                if 0 <= horas <= 23 and 0 <= minutos <= 59:
-                    return datetime.time(horas, minutos)
+                hora = _armar(match.group(1), match.group(2), match.group(3) if match.lastindex and match.lastindex >= 3 else None)
+                if hora:
+                    return hora
         return None
 
     # 2) HH:MM / N hs — pero NO franjas ni "N horas antes"
@@ -252,16 +262,14 @@ def _extraer_hora_explicita(texto_norm: str, *, solo_confirmacion: bool = False)
                 continue
             if _es_recordatorio_antes(texto_norm, match.start(1)):
                 continue
-            horas = _hora_desde_token(match.group(1))
-            if horas is None:
-                continue
-            minutos = (
-                int(match.group(2))
+            minutos_tok = (
+                match.group(2)
                 if match.lastindex and match.lastindex >= 2 and match.group(2)
-                else 0
+                else None
             )
-            if 0 <= horas <= 23 and 0 <= minutos <= 59:
-                return datetime.time(horas, minutos)
+            hora = _armar(match.group(1), minutos_tok, None)
+            if hora:
+                return hora
     return None
 
 
@@ -409,6 +417,8 @@ def guardar_cita(
     sucursal_id: int | None = None,
     vendedor_id: int | None = None,
 ) -> int:
+    from formato_hora import formatear_hora_24h
+
     db = SessionLocal()
     try:
         lead = db.query(ProspectoLead).filter(ProspectoLead.id == cliente_id).first()
@@ -421,7 +431,7 @@ def guardar_cita(
             sucursal_id=sucursal_id,
             vendedor_id=vendedor_id,
             fecha_cita=fecha_cita,
-            hora_cita=hora_cita.strftime("%H:%M"),
+            hora_cita=formatear_hora_24h(hora_cita),
             auto_interes=auto_interes,
             estado="pendiente",
             recordatorio_enviado=False,
@@ -436,12 +446,14 @@ def guardar_cita(
 
 def actualizar_hora_cita(cita_id: int, fecha_cita: datetime.date, hora_cita: datetime.time) -> bool:
     """Actualiza fecha/hora si el cliente confirma un horario más preciso."""
+    from formato_hora import formatear_hora_24h
+
     db = SessionLocal()
     try:
         cita = db.query(Cita).filter(Cita.id == cita_id).first()
         if not cita:
             return False
-        nueva_hora = hora_cita.strftime("%H:%M")
+        nueva_hora = formatear_hora_24h(hora_cita)
         if cita.fecha_cita == fecha_cita and cita.hora_cita == nueva_hora:
             return False
         print(
