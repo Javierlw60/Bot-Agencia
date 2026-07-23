@@ -64,6 +64,7 @@ from personalizacion_bot import (
     obtener_nombre_bot,
 )
 from suscripcion_agencias import ESTADO_ACTIVO, ESTADO_BLOQUEADO, agencia_vence_pronto
+from whatsapp_linea import es_phone_number_id_meta, parece_celular_argentino
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -840,11 +841,9 @@ def _resolver_sucursal_activa(
         )
         agencia = db.query(Agencia).filter(Agencia.id == agencia_id).first()
         if agencia:
-            sucursal.telefono_whatsapp = (
-                agencia.whatsapp_phone_number_id
-                or agencia.telefono_contacto
-                or "5491100000000"
-            )
+            # La línea de WhatsApp Business vive solo en la agencia; la sucursal
+            # no hereda el Phone Number ID como si fuera un celular.
+            sucursal.telefono_whatsapp = ""
             sucursal.nombre_comercial = agencia.nombre_agencia or agencia.nombre
             sucursal.asesor_virtual_nombre = agencia.nombre_bot
             sucursal.color_primario = agencia.color_primario or "#3B82F6"
@@ -875,9 +874,89 @@ def _listar_vendedores(db, sucursal_id: int) -> list[Vendedor]:
     )
 
 
-def _vendedor_sin_linea(vendedor: Vendedor | None) -> bool:
+def _normalizar_telefono(valor: str) -> str:
+    return (valor or "").strip().replace(" ", "").replace("-", "")
+
+
+def _vendedor_sin_celular(vendedor: Vendedor | None) -> bool:
     tel = (vendedor.telefono_whatsapp or "").strip() if vendedor else ""
-    return not tel or tel.startswith("sin-linea")
+    return not tel or tel.startswith("sin-linea") or es_phone_number_id_meta(tel)
+
+
+def _agencia_tiene_linea_bot(agencia: Agencia) -> bool:
+    linea = (agencia.whatsapp_phone_number_id or "").strip()
+    return bool(linea) and not linea.startswith("reg_") and not linea.startswith("sin-linea")
+
+
+def _liberar_linea_bot_en_equipo(db, agencia_id: int, linea: str) -> None:
+    """Quita la línea del bot de vendedores/sucursales que la tenían duplicada."""
+    norm = _normalizar_telefono(linea)
+    if not norm:
+        return
+    for vend in db.query(Vendedor).filter(Vendedor.agencia_id == agencia_id).all():
+        if _normalizar_telefono(vend.telefono_whatsapp) == norm:
+            vend.telefono_whatsapp = f"sin-linea-{vend.id}"
+    for suc in db.query(Sucursal).filter(Sucursal.agencia_id == agencia_id).all():
+        if _normalizar_telefono(suc.telefono_whatsapp) == norm:
+            suc.telefono_whatsapp = ""
+
+
+def _migrar_linea_bot_desde_equipo(db, agencia: Agencia) -> bool:
+    """
+    Si el Phone Number ID de Meta quedó en un vendedor/sucursal (modelo viejo),
+    lo mueve a la agencia y libera esos campos.
+    """
+    cambiado = False
+    linea_actual = (agencia.whatsapp_phone_number_id or "").strip()
+    necesita_linea = not _agencia_tiene_linea_bot(agencia)
+
+    candidatos: list[str] = []
+    for vend in db.query(Vendedor).filter(Vendedor.agencia_id == agencia.id).all():
+        tel = (vend.telefono_whatsapp or "").strip()
+        if tel and es_phone_number_id_meta(tel):
+            candidatos.append(tel)
+    for suc in db.query(Sucursal).filter(Sucursal.agencia_id == agencia.id).all():
+        tel = (suc.telefono_whatsapp or "").strip()
+        if tel and es_phone_number_id_meta(tel):
+            candidatos.append(tel)
+
+    if necesita_linea and candidatos:
+        agencia.whatsapp_phone_number_id = candidatos[0]
+        linea_actual = candidatos[0]
+        cambiado = True
+
+    if linea_actual and _agencia_tiene_linea_bot(agencia):
+        antes = [
+            (v.id, v.telefono_whatsapp)
+            for v in db.query(Vendedor).filter(Vendedor.agencia_id == agencia.id).all()
+        ]
+        _liberar_linea_bot_en_equipo(db, agencia.id, linea_actual)
+        despues = [
+            (v.id, v.telefono_whatsapp)
+            for v in db.query(Vendedor).filter(Vendedor.agencia_id == agencia.id).all()
+        ]
+        if antes != despues:
+            cambiado = True
+        for suc in db.query(Sucursal).filter(Sucursal.agencia_id == agencia.id).all():
+            tel = (suc.telefono_whatsapp or "").strip()
+            if tel and (
+                _normalizar_telefono(tel) == _normalizar_telefono(linea_actual)
+                or es_phone_number_id_meta(tel)
+            ):
+                suc.telefono_whatsapp = ""
+                cambiado = True
+
+    # Cualquier celular Meta residual en vendedores (aunque la agencia ya tenía línea).
+    for vend in db.query(Vendedor).filter(Vendedor.agencia_id == agencia.id).all():
+        tel = (vend.telefono_whatsapp or "").strip()
+        if tel and es_phone_number_id_meta(tel):
+            vend.telefono_whatsapp = f"sin-linea-{vend.id}"
+            cambiado = True
+
+    if cambiado:
+        db.commit()
+        db.refresh(agencia)
+    return cambiado
 
 
 def _asegurar_vendedor_sucursal(db, sucursal: Sucursal, agencia: Agencia) -> list[Vendedor]:
@@ -886,25 +965,15 @@ def _asegurar_vendedor_sucursal(db, sucursal: Sucursal, agencia: Agencia) -> lis
     if vendedores:
         return vendedores
 
-    telefono = (sucursal.telefono_whatsapp or "").strip()
-    if telefono:
-        en_uso = (
-            db.query(Vendedor)
-            .filter(Vendedor.telefono_whatsapp == telefono)
-            .first()
-        )
-        if en_uso:
-            telefono = ""
-
     vendedor = Vendedor(
         agencia_id=agencia.id,
         sucursal_id=sucursal.id,
         nombre="Vendedor Principal",
-        asesor_virtual_nombre=sucursal.asesor_virtual_nombre,
-        nombre_comercial=sucursal.nombre_comercial,
-        color_primario=sucursal.color_primario,
-        logo_url=agencia.logo_url,
-        telefono_whatsapp=telefono or f"sin-linea-suc-{sucursal.id}",
+        asesor_virtual_nombre=None,
+        nombre_comercial=None,
+        color_primario=None,
+        logo_url=None,
+        telefono_whatsapp=f"sin-linea-suc-{sucursal.id}",
         modo_respuesta=None,
         es_principal=True,
         activo=True,
@@ -1023,6 +1092,7 @@ def _contexto_sucursales(
 
 
 def _contexto_configuracion(db, request: Request, agencia: Agencia, sucursal_id: int | None) -> dict:
+    _migrar_linea_bot_desde_equipo(db, agencia)
     sucursales = _listar_sucursales(db, agencia.id)
     sucursal_activa = _resolver_sucursal_navegacion(request, db, agencia.id, sucursal_id)
     vendedores = _asegurar_vendedor_sucursal(db, sucursal_activa, agencia)
@@ -1030,33 +1100,25 @@ def _contexto_configuracion(db, request: Request, agencia: Agencia, sucursal_id:
         db, sucursal_activa, _vendedor_desde_query(request)
     )
     ctx = _contexto_base(request, agencia, "configuracion", sucursal_activa)
-    ctx["color_primario"] = obtener_color_primario(agencia, sucursal_activa, vendedor_activo)
+    ctx["color_primario"] = obtener_color_primario(agencia, sucursal_activa)
     ctx["modos_respuesta"] = [
         (modo, ETIQUETAS_MODO_RESPUESTA[modo]) for modo in sorted(MODOS_RESPUESTA_VALIDOS)
     ]
-    modo_vendedor = (
-        vendedor_activo.modo_respuesta
-        if vendedor_activo and vendedor_activo.modo_respuesta
-        else agencia.modo_respuesta
-    )
-    ctx["modo_respuesta_actual"] = normalizar_modo_respuesta(modo_vendedor)
+    ctx["modo_respuesta_actual"] = normalizar_modo_respuesta(agencia.modo_respuesta)
     ctx.update(
         {
             "sucursales": sucursales,
             "sucursal_activa": sucursal_activa,
             "vendedores": vendedores,
             "vendedor_activo": vendedor_activo,
-            "vendedor_sin_linea": _vendedor_sin_linea(vendedor_activo),
+            "vendedor_sin_celular": _vendedor_sin_celular(vendedor_activo),
+            "agencia_sin_linea_bot": not _agencia_tiene_linea_bot(agencia),
             "nombre_comercial_actual": obtener_nombre_agencia_bot(
-                agencia, sucursal_activa, vendedor_activo
+                agencia, sucursal_activa
             ),
-            "asesor_virtual_actual": obtener_nombre_bot(
-                agencia, sucursal_activa, vendedor_activo
-            ),
-            "logo_bot_actual": obtener_logo_bot(agencia, sucursal_activa, vendedor_activo),
-            "mensaje_bienvenida": mensaje_bienvenida_agencia(
-                agencia, sucursal_activa, vendedor_activo
-            ),
+            "asesor_virtual_actual": obtener_nombre_bot(agencia, sucursal_activa),
+            "logo_bot_actual": obtener_logo_bot(agencia, sucursal_activa),
+            "mensaje_bienvenida": mensaje_bienvenida_agencia(agencia, sucursal_activa),
             "nombre_bot_default": NOMBRE_BOT_DEFAULT,
             "nombre_agencia_default": NOMBRE_AGENCIA_DEFAULT,
         }
@@ -1869,6 +1931,87 @@ async def guardar_configuracion(
         db.close()
 
 
+@router.post("/{agencia_id}/configuracion/agencia")
+async def guardar_configuracion_agencia(
+    agencia_id: int,
+    nombre_agencia: str = Form(...),
+    direccion_agencia: str = Form(""),
+    whatsapp_phone_number_id: str = Form(...),
+    telefono_contacto: str = Form(""),
+    nombre_bot: str = Form(""),
+    color_primario: str = Form("#3B82F6"),
+    modo_respuesta: str = Form("texto"),
+    sucursal_id: int = Form(...),
+):
+    """Guarda la línea del bot y la identidad de la agencia."""
+    db = SessionLocal()
+    try:
+        agencia = _obtener_agencia(db, agencia_id)
+        linea_bot = _normalizar_telefono(whatsapp_phone_number_id)
+        if not linea_bot:
+            return RedirectResponse(
+                url=(
+                    f"/dashboard/{agencia_id}/configuracion"
+                    f"?sucursal={sucursal_id}&error=linea_bot_vacia"
+                ),
+                status_code=303,
+            )
+        if not es_phone_number_id_meta(linea_bot) and not linea_bot.startswith("reg_"):
+            return RedirectResponse(
+                url=(
+                    f"/dashboard/{agencia_id}/configuracion"
+                    f"?sucursal={sucursal_id}&error=linea_bot_invalida"
+                ),
+                status_code=303,
+            )
+
+        otra = (
+            db.query(Agencia)
+            .filter(
+                Agencia.id != agencia_id,
+                Agencia.whatsapp_phone_number_id == linea_bot,
+            )
+            .first()
+        )
+        if otra:
+            return RedirectResponse(
+                url=(
+                    f"/dashboard/{agencia_id}/configuracion"
+                    f"?sucursal={sucursal_id}&error=linea_bot_duplicada"
+                ),
+                status_code=303,
+            )
+
+        _liberar_linea_bot_en_equipo(db, agencia_id, linea_bot)
+
+        agencia.nombre_agencia = nombre_agencia.strip() or agencia.nombre
+        agencia.direccion = direccion_agencia.strip() or None
+        agencia.whatsapp_phone_number_id = linea_bot
+        agencia.telefono_contacto = telefono_contacto.strip() or None
+        agencia.nombre_bot = nombre_bot.strip() or None
+        agencia.color_primario = color_primario.strip() or "#3B82F6"
+        agencia.modo_respuesta = normalizar_modo_respuesta(modo_respuesta)
+
+        sucursal_principal = _resolver_sucursal_activa(db, agencia_id)
+        if sucursal_principal:
+            if agencia.direccion:
+                sucursal_principal.direccion = agencia.direccion
+            if not sucursal_principal.nombre_comercial:
+                sucursal_principal.nombre_comercial = agencia.nombre_agencia
+            if not sucursal_principal.asesor_virtual_nombre and agencia.nombre_bot:
+                sucursal_principal.asesor_virtual_nombre = agencia.nombre_bot
+            if agencia.color_primario:
+                sucursal_principal.color_primario = agencia.color_primario
+
+        db.commit()
+        return RedirectResponse(
+            url=f"/dashboard/{agencia_id}/configuracion?sucursal={sucursal_id}&ok=agencia",
+            status_code=303,
+        )
+    finally:
+        db.close()
+
+
 @router.post("/{agencia_id}/configuracion/sucursales")
 async def crear_sucursal(agencia_id: int):
     db = SessionLocal()
@@ -1894,10 +2037,10 @@ async def crear_sucursal(agencia_id: int):
                 agencia_id=agencia_id,
                 sucursal_id=sucursal.id,
                 nombre="Vendedor Principal",
-                asesor_virtual_nombre=sucursal.asesor_virtual_nombre,
-                nombre_comercial=sucursal.nombre_comercial,
-                color_primario=sucursal.color_primario,
-                logo_url=agencia.logo_url,
+                asesor_virtual_nombre=None,
+                nombre_comercial=None,
+                color_primario=None,
+                logo_url=None,
                 telefono_whatsapp=f"sin-linea-suc-{sucursal.id}",
                 es_principal=True,
                 activo=True,
@@ -1913,24 +2056,27 @@ async def crear_sucursal(agencia_id: int):
         db.close()
 
 
-def _normalizar_telefono(valor: str) -> str:
-    return (valor or "").strip().replace(" ", "").replace("-", "")
-
-
 def _telefono_en_uso(db, agencia_id: int, telefono: str, excluir_id: int | None) -> bool:
     if not telefono:
         return False
     q = db.query(Vendedor).filter(Vendedor.telefono_whatsapp == telefono)
     if excluir_id:
         q = q.filter(Vendedor.id != excluir_id)
-    return db.query(q.exists()).scalar()
+    if db.query(q.exists()).scalar():
+        return True
+    agencia = db.query(Agencia).filter(Agencia.id == agencia_id).first()
+    if agencia and _normalizar_telefono(agencia.whatsapp_phone_number_id) == _normalizar_telefono(
+        telefono
+    ):
+        return True
+    return False
 
 
 @router.post("/{agencia_id}/configuracion/vendedores")
 async def crear_vendedor(agencia_id: int, sucursal_id: int = Form(...)):
     db = SessionLocal()
     try:
-        agencia = _obtener_agencia(db, agencia_id)
+        _obtener_agencia(db, agencia_id)
         sucursal = _validar_sucursal(db, agencia_id, sucursal_id)
         existentes = _listar_vendedores(db, sucursal.id)
         es_primero = not existentes
@@ -1939,9 +2085,9 @@ async def crear_vendedor(agencia_id: int, sucursal_id: int = Form(...)):
             sucursal_id=sucursal.id,
             nombre="Vendedor Principal" if es_primero else f"Vendedor {len(existentes) + 1}",
             asesor_virtual_nombre=None,
-            nombre_comercial=sucursal.nombre_comercial,
-            color_primario=sucursal.color_primario,
-            logo_url=agencia.logo_url,
+            nombre_comercial=None,
+            color_primario=None,
+            logo_url=None,
             telefono_whatsapp=f"sin-linea-{uuid.uuid4().hex[:10]}",
             es_principal=not existentes,
             activo=True,
@@ -1966,44 +2112,50 @@ async def guardar_vendedor(
     vendedor_id: int,
     sucursal_id: int = Form(...),
     nombre: str = Form(""),
-    nombre_comercial: str = Form(""),
     telefono_whatsapp: str = Form(""),
-    nombre_bot: str = Form(""),
-    color_primario: str = Form("#3B82F6"),
-    modo_respuesta: str = Form("texto"),
 ):
-    """Guarda la identidad de bot de un VENDEDOR (asesor, línea, color, modo)."""
+    """Guarda datos humanos del vendedor (nombre + celular personal)."""
     db = SessionLocal()
     try:
-        _obtener_agencia(db, agencia_id)
+        agencia = _obtener_agencia(db, agencia_id)
         sucursal = _validar_sucursal(db, agencia_id, sucursal_id)
         vendedor = _validar_vendedor(db, agencia_id, sucursal.id, vendedor_id)
 
         tel = _normalizar_telefono(telefono_whatsapp)
-        if not tel:
-            raise HTTPException(
-                status_code=400,
-                detail="El teléfono de WhatsApp del vendedor es obligatorio",
-            )
-        if _telefono_en_uso(db, agencia_id, tel, vendedor.id):
-            return RedirectResponse(
-                url=(
-                    f"/dashboard/{agencia_id}/configuracion"
-                    f"?sucursal={sucursal.id}&vendedor={vendedor.id}&error=telefono_duplicado"
-                ),
-                status_code=303,
-            )
+        if tel:
+            if es_phone_number_id_meta(tel) or _normalizar_telefono(
+                agencia.whatsapp_phone_number_id
+            ) == tel:
+                return RedirectResponse(
+                    url=(
+                        f"/dashboard/{agencia_id}/configuracion"
+                        f"?sucursal={sucursal.id}&vendedor={vendedor.id}"
+                        f"&error=telefono_es_linea_bot"
+                    ),
+                    status_code=303,
+                )
+            if not parece_celular_argentino(tel) and len(re.sub(r"\D", "", tel)) < 8:
+                return RedirectResponse(
+                    url=(
+                        f"/dashboard/{agencia_id}/configuracion"
+                        f"?sucursal={sucursal.id}&vendedor={vendedor.id}"
+                        f"&error=telefono_invalido"
+                    ),
+                    status_code=303,
+                )
+            if _telefono_en_uso(db, agencia_id, tel, vendedor.id):
+                return RedirectResponse(
+                    url=(
+                        f"/dashboard/{agencia_id}/configuracion"
+                        f"?sucursal={sucursal.id}&vendedor={vendedor.id}&error=telefono_duplicado"
+                    ),
+                    status_code=303,
+                )
+            vendedor.telefono_whatsapp = tel
+        else:
+            vendedor.telefono_whatsapp = f"sin-linea-{vendedor.id}"
 
         vendedor.nombre = nombre.strip() or vendedor.nombre
-        vendedor.nombre_comercial = nombre_comercial.strip() or None
-        vendedor.asesor_virtual_nombre = nombre_bot.strip() or None
-        vendedor.color_primario = color_primario.strip() or None
-        vendedor.modo_respuesta = normalizar_modo_respuesta(modo_respuesta)
-        vendedor.telefono_whatsapp = tel
-
-        # El vendedor principal define la línea legacy de la sucursal (fallback).
-        if vendedor.es_principal:
-            sucursal.telefono_whatsapp = tel
 
         db.commit()
         return RedirectResponse(
@@ -2047,7 +2199,6 @@ async def eliminar_vendedor(agencia_id: int, vendedor_id: int, sucursal_id: int 
             )
             if nuevo:
                 nuevo.es_principal = True
-                sucursal.telefono_whatsapp = nuevo.telefono_whatsapp or ""
         db.commit()
         return RedirectResponse(
             url=f"/dashboard/{agencia_id}/configuracion?sucursal={sucursal.id}&ok=vendedor_eliminado",

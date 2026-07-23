@@ -1,4 +1,4 @@
-"""Identidad del bot por vendedor → sucursal → agencia (con fallbacks)."""
+"""Identidad del bot: agencia (principal) → sucursal (sede) → fallbacks."""
 
 from models.database import Agencia, SessionLocal, Sucursal, Vendedor
 
@@ -44,12 +44,13 @@ def obtener_color_primario(
     sucursal: Sucursal | None = None,
     vendedor: Vendedor | None = None,
 ) -> str:
-    for fuente in (vendedor, sucursal):
+    """Color de marca: agencia → sucursal (vendedor ya no define la marca del bot)."""
+    del vendedor  # compatibilidad de firma; no se usa
+    for fuente in (agencia, sucursal):
         valor = _valor(fuente, "color_primario")
         if valor:
             return valor
-    valor = _valor(agencia, "color_primario")
-    return valor or COLOR_PRIMARIO_DEFAULT
+    return COLOR_PRIMARIO_DEFAULT
 
 
 def obtener_nombre_bot(
@@ -57,11 +58,12 @@ def obtener_nombre_bot(
     sucursal: Sucursal | None = None,
     vendedor: Vendedor | None = None,
 ) -> str:
-    for fuente in (vendedor, sucursal):
-        valor = _valor(fuente, "asesor_virtual_nombre")
-        if valor:
-            return valor
+    """Nombre del asesor virtual: agencia → sucursal."""
+    del vendedor
     valor = _valor(agencia, "nombre_bot")
+    if valor:
+        return valor
+    valor = _valor(sucursal, "asesor_virtual_nombre")
     return valor or NOMBRE_BOT_DEFAULT
 
 
@@ -70,15 +72,27 @@ def obtener_nombre_agencia_bot(
     sucursal: Sucursal | None = None,
     vendedor: Vendedor | None = None,
 ) -> str:
-    for fuente in (vendedor, sucursal):
-        valor = _valor(fuente, "nombre_comercial")
-        if valor:
-            return valor
-    valor = (
-        _valor(agencia, "nombre_agencia")
-        or _valor(agencia, "nombre")
-    )
+    """Nombre comercial que dice el bot: sucursal → agencia."""
+    del vendedor
+    valor = _valor(sucursal, "nombre_comercial")
+    if valor:
+        return valor
+    valor = _valor(agencia, "nombre_agencia") or _valor(agencia, "nombre")
     return valor or NOMBRE_AGENCIA_DEFAULT
+
+
+def obtener_direccion_bot(
+    agencia: Agencia,
+    sucursal: Sucursal | None = None,
+) -> str | None:
+    """Dirección oficial para visitas: sucursal de contacto → agencia."""
+    valor = _valor(sucursal, "direccion") or _valor(agencia, "direccion")
+    return valor or None
+
+
+def obtener_telefono_contacto_bot(agencia: Agencia) -> str | None:
+    valor = _valor(agencia, "telefono_contacto")
+    return valor or None
 
 
 def obtener_logo_bot(
@@ -86,9 +100,7 @@ def obtener_logo_bot(
     sucursal: Sucursal | None = None,
     vendedor: Vendedor | None = None,
 ) -> str | None:
-    valor = _valor(vendedor, "logo_url")
-    if valor:
-        return valor
+    del sucursal, vendedor
     return (getattr(agencia, "logo_url", None) or None)
 
 
