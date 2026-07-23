@@ -61,10 +61,14 @@ def _post_json(url: str, payload: dict[str, Any], token: str) -> dict[str, Any]:
         raise
 
 
-def _multipart_audio(archivo: Path) -> tuple[bytes, str]:
+def _multipart_archivo(
+    archivo: Path,
+    *,
+    tipo_media: str | None = None,
+) -> tuple[bytes, str]:
     boundary = uuid.uuid4().hex
     contenido = archivo.read_bytes()
-    mime = mimetypes.guess_type(archivo.name)[0] or "audio/mpeg"
+    mime = tipo_media or mimetypes.guess_type(archivo.name)[0] or "application/octet-stream"
     partes: list[bytes] = [
         f"--{boundary}\r\n".encode(),
         b'Content-Disposition: form-data; name="messaging_product"\r\n\r\n',
@@ -82,6 +86,12 @@ def _multipart_audio(archivo: Path) -> tuple[bytes, str]:
         f"--{boundary}--\r\n".encode(),
     ]
     return b"".join(partes), boundary
+
+
+def _multipart_audio(archivo: Path) -> tuple[bytes, str]:
+    return _multipart_archivo(
+        archivo, tipo_media=mimetypes.guess_type(archivo.name)[0] or "audio/mpeg"
+    )
 
 
 def _get_json(url: str, token: str) -> dict[str, Any]:
@@ -130,8 +140,14 @@ def descargar_media_whatsapp(
     return destino
 
 
-def _subir_audio(whatsapp_phone_number_id: str, ruta_audio: Path, token: str) -> str:
-    cuerpo, boundary = _multipart_audio(ruta_audio)
+def _subir_media(
+    whatsapp_phone_number_id: str,
+    ruta_archivo: Path,
+    token: str,
+    *,
+    tipo_media: str | None = None,
+) -> str:
+    cuerpo, boundary = _multipart_archivo(ruta_archivo, tipo_media=tipo_media)
     url = f"{GRAPH_API_BASE}/{whatsapp_phone_number_id}/media"
     req = Request(
         url,
@@ -148,6 +164,96 @@ def _subir_audio(whatsapp_phone_number_id: str, ruta_audio: Path, token: str) ->
     if not media_id:
         raise RuntimeError(f"WhatsApp no devolvió media id: {data}")
     return str(media_id)
+
+
+def _subir_audio(whatsapp_phone_number_id: str, ruta_audio: Path, token: str) -> str:
+    return _subir_media(whatsapp_phone_number_id, ruta_audio, token)
+
+
+def _ruta_local_imagen(url_o_ruta: str) -> Path | None:
+    valor = (url_o_ruta or "").strip()
+    if not valor:
+        return None
+    candidato = Path(valor)
+    if candidato.is_file():
+        return candidato
+    if valor.startswith("/static/"):
+        base = Path(__file__).resolve().parent
+        local = base / valor.lstrip("/")
+        if local.is_file():
+            return local
+    return None
+
+
+def enviar_imagen_whatsapp(
+    telefono_destino: str,
+    imagen_url_o_ruta: str,
+    whatsapp_phone_number_id: str,
+    caption: str = "",
+) -> bool:
+    """
+    Envía una imagen por WhatsApp Cloud API.
+    Preferencia: subir archivo local. Si no hay archivo, usa link público https.
+    """
+    telefono = _normalizar_telefono(telefono_destino)
+    origen = (imagen_url_o_ruta or "").strip()
+    if not telefono or not origen:
+        return False
+
+    modo = _modo_whatsapp()
+    if modo == "consola":
+        print(f"\n[WHATSAPP IMAGEN -> +{telefono} | linea {whatsapp_phone_number_id}]")
+        print(f"Origen: {origen}")
+        if caption:
+            print(f"Caption: {caption}")
+        print()
+        return True
+
+    if modo != "api":
+        print(f"[WHATSAPP] Modo desconocido: {modo}")
+        return False
+
+    token = _token()
+    if not token:
+        print("[WHATSAPP] WHATSAPP_ACCESS_TOKEN no configurado.")
+        return False
+
+    url = f"{GRAPH_API_BASE}/{whatsapp_phone_number_id}/messages"
+    imagen_payload: dict[str, Any] = {}
+    local = _ruta_local_imagen(origen)
+    try:
+        if local is not None:
+            mime = mimetypes.guess_type(local.name)[0] or "image/jpeg"
+            if not mime.startswith("image/"):
+                mime = "image/jpeg"
+            media_id = _subir_media(
+                whatsapp_phone_number_id, local, token, tipo_media=mime
+            )
+            imagen_payload["id"] = media_id
+        elif origen.startswith(("https://", "http://")):
+            imagen_payload["link"] = origen
+        else:
+            print(f"[WHATSAPP] Imagen no accesible (ni archivo local ni URL): {origen}")
+            return False
+
+        if caption.strip():
+            imagen_payload["caption"] = caption.strip()[:1024]
+
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": telefono,
+            "type": "image",
+            "image": imagen_payload,
+        }
+        _post_json(url, payload, token)
+        return True
+    except Exception as exc:
+        print(
+            f"[WHATSAPP] Error enviando imagen a +{telefono} "
+            f"(linea {whatsapp_phone_number_id}): {exc}"
+        )
+        return False
 
 
 def enviar_mensaje_texto_whatsapp(
