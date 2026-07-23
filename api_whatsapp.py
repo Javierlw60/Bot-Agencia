@@ -303,12 +303,8 @@ def _procesar_un_mensaje(
             fallback_url=fallback_url,
             wa_message_id=wa_message_id,
         )
-        if not resultado.get("ok"):
-            from whatsapp_idempotencia import liberar_reclamo_si_fallo
-
-            liberar_reclamo_si_fallo(wa_message_id)
-        else:
-            liberar_lock_mensaje(wa_message_id)
+        # Si respondimos (aunque STT diga ok=False), no re-procesar el mismo wamid.
+        liberar_lock_mensaje(wa_message_id)
         return resultado
     except Exception:
         from whatsapp_idempotencia import liberar_reclamo_si_fallo
