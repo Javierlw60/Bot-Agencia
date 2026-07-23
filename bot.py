@@ -180,6 +180,8 @@ class SesionCliente:
     cuota_diaria_agotada: bool = False
     # Autos a los que ya se les envió el álbum en esta conversación (anti-loop).
     autos_con_fotos_enviadas: set[int] = field(default_factory=set)
+    # Si el último mensaje entrante fue audio → responder en voz (espejo).
+    entrada_fue_audio: bool = False
     historial: list[str] = field(default_factory=list)
 
 
@@ -211,11 +213,21 @@ def _entregar_respuesta_whatsapp(
         sucursal=sucursal,
         vendedor=vendedor,
     )
+    # Espejo de modalidad: audio in → voz; texto in → texto.
+    # "ambas" en la agencia manda texto+voz siempre.
+    modo_agencia = (agencia.modo_respuesta or "texto").strip().lower()
+    if modo_agencia == "ambas":
+        modo = "ambas"
+    elif sesion and sesion.entrada_fue_audio:
+        modo = "voz"
+    else:
+        modo = "texto"
+
     enviar_respuesta_bot(
         telefono_destino=telefono,
         mensaje=texto,
         whatsapp_phone_number_id=line_id,
-        modo_respuesta=agencia.modo_respuesta,
+        modo_respuesta=modo,
         imprimir_texto_en_consola=not via_whatsapp,
     )
 

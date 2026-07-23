@@ -50,6 +50,20 @@ async def _generar_audio_async(texto: str, destino: Path, voz: str) -> None:
     await communicate.save(str(destino))
 
 
+def _correr_coro(coro):
+    """Ejecuta una corrutina aunque ya haya un event loop (uvicorn/FastAPI)."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+
+    # Ya hay loop: correr en un hilo con su propio asyncio.run.
+    import concurrent.futures
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result(timeout=120)
+
+
 def convertir_texto_a_voz(texto: str, voz: str | None = None) -> Path:
     """
     Convierte texto a MP3 y devuelve la ruta del archivo.
@@ -68,7 +82,9 @@ def convertir_texto_a_voz(texto: str, voz: str | None = None) -> Path:
     if destino.exists() and destino.stat().st_size > 0:
         return destino
 
-    asyncio.run(_generar_audio_async(texto_tts, destino, voz_usada))
+    _correr_coro(_generar_audio_async(texto_tts, destino, voz_usada))
+    if not destino.exists() or destino.stat().st_size == 0:
+        raise RuntimeError("edge-tts no generó el archivo de audio.")
     return destino
 
 
