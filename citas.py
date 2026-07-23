@@ -417,6 +417,8 @@ def guardar_cita(
     sucursal_id: int | None = None,
     vendedor_id: int | None = None,
 ) -> int:
+    from formato_hora import formatear_hora_24h
+
     db = SessionLocal()
     try:
         lead = db.query(ProspectoLead).filter(ProspectoLead.id == cliente_id).first()
@@ -444,12 +446,14 @@ def guardar_cita(
 
 def actualizar_hora_cita(cita_id: int, fecha_cita: datetime.date, hora_cita: datetime.time) -> bool:
     """Actualiza fecha/hora si el cliente confirma un horario más preciso."""
+    from formato_hora import formatear_hora_24h
+
     db = SessionLocal()
     try:
         cita = db.query(Cita).filter(Cita.id == cita_id).first()
         if not cita:
             return False
-        nueva_hora = hora_cita.strftime("%H:%M")
+        nueva_hora = formatear_hora_24h(hora_cita)
         if cita.fecha_cita == fecha_cita and cita.hora_cita == nueva_hora:
             return False
         print(
