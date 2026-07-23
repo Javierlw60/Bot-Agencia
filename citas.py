@@ -138,29 +138,80 @@ def _proximo_dia_semana(desde: datetime.date, dia_objetivo: int) -> datetime.dat
     return desde + datetime.timedelta(days=dias_adelante)
 
 
-def _extraer_hora_explicita(texto_norm: str) -> datetime.time | None:
-    patrones = [
+def _es_franja_horaria(texto_norm: str, inicio: int) -> bool:
+    """True si el HH:MM en `inicio` forma parte de una franja tipo 09:00-13:00 / 09:00 a 13:00."""
+    ventana = texto_norm[max(0, inicio - 8) : inicio + 24]
+    return bool(
+        re.search(
+            r"\d{1,2}:\d{2}\s*(?:a|-|–|—|/|hasta)\s*\d{1,2}:\d{2}",
+            ventana,
+        )
+    )
+
+
+def _es_recordatorio_antes(texto_norm: str, inicio: int) -> bool:
+    """True si el número es '1 hora antes' / 'N horas antes' (no hora de cita)."""
+    ventana = texto_norm[inicio : inicio + 28]
+    return bool(re.search(r"^\d{1,2}(?::\d{2})?\s*horas?\s+antes\b", ventana))
+
+
+def _extraer_hora_explicita(texto_norm: str, *, solo_confirmacion: bool = False) -> datetime.time | None:
+    """
+    Extrae la hora de la cita.
+
+    Prioriza 'a las 10' / 'para las 10:00'.
+    Ignora franjas de atención (09:00-13:00) y '1 hora antes'.
+    """
+    # 1) Confirmaciones explícitas: "a las 10", "para las 10:00", "tipo 10"
+    for match in re.finditer(
         r"(?:a las?|para las?|tipo)\s*(\d{1,2})(?::(\d{2}))?",
+        texto_norm,
+    ):
+        if _es_recordatorio_antes(texto_norm, match.start(1)):
+            continue
+        horas = int(match.group(1))
+        minutos = int(match.group(2) or 0)
+        if 0 <= horas <= 23 and 0 <= minutos <= 59:
+            return datetime.time(horas, minutos)
+
+    if solo_confirmacion:
+        # En mensajes del bot, solo aceptar "te esperamos … a las …" / "quedamos a las"
+        for match in re.finditer(
+            r"(?:te esperamos|quedamos|confirmad[oa]|cita)\b.{0,80}?"
+            r"(?:a las?|para las?)\s*(\d{1,2})(?::(\d{2}))?",
+            texto_norm,
+        ):
+            horas = int(match.group(1))
+            minutos = int(match.group(2) or 0)
+            if 0 <= horas <= 23 and 0 <= minutos <= 59:
+                return datetime.time(horas, minutos)
+        return None
+
+    # 2) HH:MM / N hs — pero NO franjas ni "N horas antes"
+    for patron in (
         r"(\d{1,2}):(\d{2})\s*(?:hs|h|horas?)?",
         r"(\d{1,2})\s*(?:hs|horas)\b",
         r"\b(\d{1,2})(?::(\d{2}))?\s*(?:hs|h|horas?)\b",
-    ]
-    for patron in patrones:
-        match = re.search(patron, texto_norm)
-        if not match:
-            continue
-        horas = int(match.group(1))
-        minutos = int(match.group(2)) if match.lastindex and match.lastindex >= 2 and match.group(2) else 0
-        if 0 <= horas <= 23 and 0 <= minutos <= 59:
-            return datetime.time(horas, minutos)
+    ):
+        for match in re.finditer(patron, texto_norm):
+            if _es_franja_horaria(texto_norm, match.start(1)):
+                continue
+            if _es_recordatorio_antes(texto_norm, match.start(1)):
+                continue
+            horas = int(match.group(1))
+            minutos = int(match.group(2)) if match.lastindex and match.lastindex >= 2 and match.group(2) else 0
+            if 0 <= horas <= 23 and 0 <= minutos <= 59:
+                return datetime.time(horas, minutos)
     return None
 
 
 def _obtener_hora_acordada(texto: str, historial: list[str] | None = None) -> datetime.time | None:
+    # 1) Mensaje actual del cliente
     hora = _extraer_hora_explicita(_normalizar(texto))
     if hora:
         return hora
 
+    # 2) Mensajes previos del cliente (más recientes primero)
     for linea in reversed(historial or []):
         if not linea.startswith("Cliente:"):
             continue
@@ -169,11 +220,12 @@ def _obtener_hora_acordada(texto: str, historial: list[str] | None = None) -> da
         if hora:
             return hora
 
+    # 3) Confirmaciones del bot ("te esperamos a las 10"), nunca franjas 09:00-13:00
     for linea in reversed(historial or []):
         if not linea.startswith("Bot:"):
             continue
         mensaje_bot = linea.removeprefix("Bot:").strip()
-        hora = _extraer_hora_explicita(_normalizar(mensaje_bot))
+        hora = _extraer_hora_explicita(_normalizar(mensaje_bot), solo_confirmacion=True)
         if hora:
             return hora
 
@@ -214,10 +266,17 @@ def extraer_fecha_hora_cita(texto: str, historial: list[str] | None = None) -> t
             hora = datetime.time(15, 0)
         elif any(
             t in contexto
-            for t in ["a la mañana", "por la mañana", "por la manana", "turno mañana", "turno manana"]
+            for t in [
+                "a la manana",
+                "por la manana",
+                "turno manana",
+                "a la mañana",
+                "por la mañana",
+                "turno mañana",
+            ]
         ):
             hora = datetime.time(10, 0)
-        elif re.search(r"\btarde\b", contexto) and "mañana o a la tarde" not in contexto:
+        elif re.search(r"\btarde\b", contexto) and "manana o a la tarde" not in contexto and "mañana o a la tarde" not in contexto:
             hora = datetime.time(15, 0)
 
     if fecha is None and hora is not None and sesion_en_cierre_de_visita(contexto):
@@ -315,10 +374,31 @@ def guardar_cita(
         db.close()
 
 
-def procesar_cita_si_corresponde(sesion) -> int | None:
-    if sesion.cita_registrada_id:
-        return sesion.cita_registrada_id
+def actualizar_hora_cita(cita_id: int, fecha_cita: datetime.date, hora_cita: datetime.time) -> bool:
+    """Actualiza fecha/hora si el cliente confirma un horario más preciso."""
+    db = SessionLocal()
+    try:
+        cita = db.query(Cita).filter(Cita.id == cita_id).first()
+        if not cita:
+            return False
+        nueva_hora = hora_cita.strftime("%H:%M")
+        if cita.fecha_cita == fecha_cita and cita.hora_cita == nueva_hora:
+            return False
+        print(
+            f"[CITAS] Actualizando cita id={cita_id}: "
+            f"{cita.fecha_cita} {cita.hora_cita} → {fecha_cita} {nueva_hora}"
+        )
+        cita.fecha_cita = fecha_cita
+        cita.hora_cita = nueva_hora
+        # Si cambia el horario, permitir reenviar recordatorio.
+        cita.recordatorio_enviado = False
+        db.commit()
+        return True
+    finally:
+        db.close()
 
+
+def procesar_cita_si_corresponde(sesion) -> int | None:
     ultimo_mensaje = ""
     for linea in reversed(sesion.historial):
         if linea.startswith("Cliente:"):
@@ -326,6 +406,13 @@ def procesar_cita_si_corresponde(sesion) -> int | None:
             break
 
     if not detectar_visita(ultimo_mensaje, sesion.historial):
+        # Igual permitir actualizar hora si ya hay cita y el cliente dice "a las 10"
+        if sesion.cita_registrada_id and _extraer_hora_explicita(_normalizar(ultimo_mensaje)):
+            fecha_hora = extraer_fecha_hora_cita(ultimo_mensaje, sesion.historial)
+            if fecha_hora:
+                fecha_cita, hora_cita = fecha_hora
+                actualizar_hora_cita(sesion.cita_registrada_id, fecha_cita, hora_cita)
+                return sesion.cita_registrada_id
         return None
 
     fecha_hora = extraer_fecha_hora_cita(ultimo_mensaje, sesion.historial)
@@ -333,6 +420,12 @@ def procesar_cita_si_corresponde(sesion) -> int | None:
         return None
 
     fecha_cita, hora_cita = fecha_hora
+
+    # Si ya había cita (p.ej. se guardó 09:00 por la franja), actualizar a la hora real.
+    if sesion.cita_registrada_id:
+        actualizar_hora_cita(sesion.cita_registrada_id, fecha_cita, hora_cita)
+        return sesion.cita_registrada_id
+
     from inventory import resolver_sucursal_id_cita
 
     vendedor_id = getattr(sesion, "vendedor_origen_id", None)
