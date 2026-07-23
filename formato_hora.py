@@ -32,6 +32,34 @@ _NUMEROS_ES = (
     "veintitrés",
 )
 
+# Para citas de agencia: "a las 2" / "2 hs" casi siempre es tarde (14:00).
+_HORAS_TARDE_IMPLICITA = {1, 2, 3, 4, 5, 6, 7}
+
+_PALABRA_A_HORA = {
+    "una": 1,
+    "uno": 1,
+    "dos": 2,
+    "tres": 3,
+    "cuatro": 4,
+    "cinco": 5,
+    "seis": 6,
+    "siete": 7,
+    "ocho": 8,
+    "nueve": 9,
+    "diez": 10,
+    "once": 11,
+    "doce": 12,
+    "trece": 13,
+    "catorce": 14,
+    "quince": 15,
+    "dieciseis": 16,
+    "dieciséis": 16,
+    "diecisiete": 17,
+    "dieciocho": 18,
+    "diecinueve": 19,
+    "veinte": 20,
+}
+
 
 def formatear_hora_24h(hora: datetime.time | str) -> str:
     """Siempre HH:MM en 24 horas (ej. 14:00)."""
@@ -53,7 +81,8 @@ def hora_para_voz(hora: datetime.time | str) -> str:
     """
     Cómo debe sonar la hora en audio, sin ambigüedad.
     14:00 → 'catorce horas'
-    14:30 → 'catorce y treinta'
+    14:30 → 'catorce y media'
+    15:15 → 'quince y cuarto'
     """
     texto = formatear_hora_24h(hora)
     h, m = map(int, texto.split(":"))
@@ -64,11 +93,145 @@ def hora_para_voz(hora: datetime.time | str) -> str:
         return f"{palabra_h} y cuarto"
     if m == 30:
         return f"{palabra_h} y media"
+    if m == 45:
+        return f"{palabra_h} y cuarenta y cinco"
     return f"{palabra_h} y {_numero_en_palabras(m)}"
 
 
+def _a_24h_cita(hora: int, minuto: int = 0) -> datetime.time:
+    """Si es 1–7 sin contexto am/pm, asumimos tarde (13–19) para visitas."""
+    if hora in _HORAS_TARDE_IMPLICITA:
+        hora = hora + 12
+    return datetime.time(hora % 24, minuto)
+
+
+def _token_a_hora(token: str) -> int | None:
+    t = (token or "").strip().lower()
+    if t.isdigit():
+        v = int(t)
+        return v if 0 <= v <= 23 else None
+    return _PALABRA_A_HORA.get(t)
+
+
+def normalizar_horas_mensaje_24h(texto: str) -> str:
+    """
+    Reescribe el mensaje saliente a formato 24h explícito (14:00 hs).
+    Corrige '2 hs', '2HS', 'a las 2', 'a las dos', '2pm', etc.
+    """
+    if not texto:
+        return texto
+    out = texto
+    palabras = "|".join(sorted(_PALABRA_A_HORA.keys(), key=len, reverse=True))
+
+    def _fmt(h: int, m: int = 0) -> str:
+        return f"{formatear_hora_24h(datetime.time(h % 24, m))} hs"
+
+    def _hora_cita_desde(h: int, m: int = 0) -> tuple[int, int]:
+        if h in _HORAS_TARDE_IMPLICITA:
+            h += 12
+        return h, m
+
+    # 2pm / 2 p.m. / 2am
+    def _repl_pm(m: re.Match[str]) -> str:
+        h = int(m.group(1))
+        mins = int(m.group(2) or 0)
+        if h < 12:
+            h += 12
+        return _fmt(h, mins)
+
+    def _repl_am(m: re.Match[str]) -> str:
+        h = int(m.group(1)) % 12
+        mins = int(m.group(2) or 0)
+        return _fmt(h, mins)
+
+    out = re.sub(
+        r"\b(\d{1,2})(?::([0-5]\d))?\s*p\.?\s*m\.?\b",
+        _repl_pm,
+        out,
+        flags=re.IGNORECASE,
+    )
+    out = re.sub(
+        r"\b(\d{1,2})(?::([0-5]\d))?\s*a\.?\s*m\.?\b",
+        _repl_am,
+        out,
+        flags=re.IGNORECASE,
+    )
+
+    # "a las 2 de la tarde" / "para las dos de la tarde"
+    def _repl_tarde(m: re.Match[str]) -> str:
+        h = _token_a_hora(m.group(2))
+        if h is None:
+            return m.group(0)
+        mins = int(m.group(3) or 0)
+        if h < 12:
+            h += 12
+        return f"{m.group(1)} {_fmt(h, mins)}"
+
+    out = re.sub(
+        rf"\b(a las?|para las?)\s*(\d{{1,2}}|{palabras})(?::([0-5]\d))?\s*"
+        rf"(?:de la|por la)?\s*tarde\b",
+        _repl_tarde,
+        out,
+        flags=re.IGNORECASE,
+    )
+
+    # "a las 2 hs" / "a las 2HS" / "para las 14:00 hs" / "a las dos hs"
+    def _repl_a_las_hs(m: re.Match[str]) -> str:
+        h = _token_a_hora(m.group(2))
+        if h is None:
+            return m.group(0)
+        mins = int(m.group(3) or 0)
+        h, mins = _hora_cita_desde(h, mins)
+        return f"{m.group(1)} {_fmt(h, mins)}"
+
+    out = re.sub(
+        rf"\b(a las?|para las?)\s*(\d{{1,2}}|{palabras})(?::([0-5]\d))?\s*hs\.?\b",
+        _repl_a_las_hs,
+        out,
+        flags=re.IGNORECASE,
+    )
+
+    # "2 hs" / "2HS" / "3hs" / "14:30hs" (sin "a las")
+    def _repl_n_hs(m: re.Match[str]) -> str:
+        h = int(m.group(1))
+        mins = int(m.group(2) or 0)
+        h, mins = _hora_cita_desde(h, mins)
+        if not (0 <= h <= 23):
+            return m.group(0)
+        return _fmt(h, mins)
+
+    out = re.sub(
+        r"\b([01]?\d|2[0-3])(?::([0-5]\d))?\s*hs\.?\b",
+        _repl_n_hs,
+        out,
+        flags=re.IGNORECASE,
+    )
+
+    # "a las 2" / "a las dos" / "para las 3:30" (sin hs/am/pm ni ':' colgado)
+    def _repl_a_las(m: re.Match[str]) -> str:
+        h = _token_a_hora(m.group(2))
+        if h is None:
+            return m.group(0)
+        mins = int(m.group(3) or 0)
+        h, mins = _hora_cita_desde(h, mins)
+        return f"{m.group(1)} {_fmt(h, mins)}"
+
+    out = re.sub(
+        rf"\b(a las?|para las?)\s*(\d{{1,2}}|{palabras})(?::([0-5]\d))?"
+        rf"(?!\d)(?!:)(?!\s*hs\.?\b)(?!\s*(?:a\.?\s*m\.?|p\.?\s*m\.?|am|pm)\b)",
+        _repl_a_las,
+        out,
+        flags=re.IGNORECASE,
+    )
+
+    out = re.sub(r"\bhs\.?\s+hs\.?\b", "hs", out, flags=re.IGNORECASE)
+    out = re.sub(r"(:\d{2}\s*hs):\d{2}\s*hs\b", r"\1", out, flags=re.IGNORECASE)
+    return out
+
+
 def expandir_horas_para_tts(texto: str) -> str:
-    """Reemplaza 14:00 / 14 hs / 14hs por forma hablada clara en 24h."""
+    """Normaliza a 24h y reemplaza 14:00 / 14 hs por forma hablada clara."""
+    out = normalizar_horas_mensaje_24h(texto)
 
     def _repl_hhmm(match: re.Match[str]) -> str:
         h = int(match.group(1))
@@ -86,13 +249,22 @@ def expandir_horas_para_tts(texto: str) -> str:
     out = re.sub(
         r"\b([01]?\d|2[0-3]):([0-5]\d)(?:\s*hs\.?)?(?=\s|$|[.,;:!?])",
         _repl_hhmm,
-        texto,
+        out,
         flags=re.IGNORECASE,
     )
     out = re.sub(r"\b([01]?\d|2[0-3])\s*hs\.?\b", _repl_hs, out, flags=re.IGNORECASE)
-    # Evitar que el TTS lea "2pm" si quedó en el texto.
-    out = re.sub(r"\b(\d{1,2})\s*p\.?\s*m\.?\b", lambda m: hora_para_voz(_pm_a_24(int(m.group(1)))), out, flags=re.IGNORECASE)
-    out = re.sub(r"\b(\d{1,2})\s*a\.?\s*m\.?\b", lambda m: hora_para_voz(datetime.time(int(m.group(1)) % 12, 0)), out, flags=re.IGNORECASE)
+    out = re.sub(
+        r"\b(\d{1,2})\s*p\.?\s*m\.?\b",
+        lambda m: hora_para_voz(_pm_a_24(int(m.group(1)))),
+        out,
+        flags=re.IGNORECASE,
+    )
+    out = re.sub(
+        r"\b(\d{1,2})\s*a\.?\s*m\.?\b",
+        lambda m: hora_para_voz(datetime.time(int(m.group(1)) % 12, 0)),
+        out,
+        flags=re.IGNORECASE,
+    )
     return out
 
 
