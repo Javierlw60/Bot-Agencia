@@ -45,8 +45,11 @@ from permuta import (
 )
 from personalizacion_bot import (
     mensaje_bienvenida_agencia,
+    obtener_direccion_bot,
     obtener_nombre_agencia_bot,
+    obtener_nombre_bot,
     obtener_sucursal,
+    obtener_telefono_contacto_bot,
     obtener_vendedor,
 )
 from prompts import generar_prompt_maestro
@@ -583,6 +586,62 @@ def _vendedor_sesion_bot(sesion: SesionCliente) -> object | None:
     return obtener_vendedor(sesion.agencia_id, sesion.vendedor_origen_id)
 
 
+def _armar_datos_ubicacion(agencia: Agencia, sesion: SesionCliente) -> str:
+    sucursal = _sucursal_sesion_bot(sesion)
+    direccion = obtener_direccion_bot(agencia, sucursal)
+    telefono = obtener_telefono_contacto_bot(agencia)
+    nombre_suc = ""
+    if sesion.sucursal_origen_id:
+        nombre_suc = obtener_nombre_sucursal(sesion.agencia_id, sesion.sucursal_origen_id)
+    lineas = ["DATOS DE UBICACIÓN (OBLIGATORIOS — no inventar nada fuera de esto):"]
+    if nombre_suc:
+        lineas.append(f"- Sucursal de contacto: {nombre_suc}")
+    if direccion:
+        lineas.append(f"- Dirección oficial: {direccion}")
+    else:
+        lineas.append(
+            "- Dirección oficial: NO CARGADA. Decile que un asesor se la confirma; "
+            "PROHIBIDO inventar calles o números."
+        )
+    if telefono:
+        lineas.append(f"- Teléfono de contacto: {telefono}")
+    return "\n".join(lineas)
+
+
+_PATRON_PEDIDO_DIRECCION = re.compile(
+    r"\b("
+    r"direcci[oó]n|ubicaci[oó]n|donde\s+quedan|donde\s+est[aá]n|"
+    r"donde\s+queda|donde\s+est[aá]|como\s+lleg[oa]|c[oó]mo\s+lleg[oa]|"
+    r"donde\s+los\s+encuentro|domicilio|mapa"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def cliente_pide_direccion(texto: str) -> bool:
+    return bool(_PATRON_PEDIDO_DIRECCION.search(texto or ""))
+
+
+def _respuesta_direccion_agencia(agencia: Agencia, sesion: SesionCliente) -> str:
+    sucursal = _sucursal_sesion_bot(sesion)
+    direccion = obtener_direccion_bot(agencia, sucursal)
+    nombre_agencia = obtener_nombre_agencia_bot(agencia, sucursal)
+    nombre_suc = ""
+    if sesion.sucursal_origen_id:
+        nombre_suc = obtener_nombre_sucursal(sesion.agencia_id, sesion.sucursal_origen_id)
+
+    if direccion:
+        sede = f" ({nombre_suc})" if nombre_suc else ""
+        return (
+            f"Dale, {nombre_agencia}{sede} está en *{direccion}*. "
+            "¡Te esperamos!"
+        )
+    return (
+        f"Todavía no tengo la dirección cargada de {nombre_agencia} en el sistema. "
+        "Un asesor te la confirma en un momento."
+    )
+
+
 def _enviar_bienvenida_inicial(
     sesion: SesionCliente,
     agencia: Agencia,
@@ -974,6 +1033,17 @@ def _procesar_mensaje(
     _persistir_mensaje(sesion, "cliente", etiqueta_cliente or texto)
     _extraer_datos_en_segundo_plano(sesion, texto)
 
+    # Pedido de dirección: respuesta determinística con la dirección real de la BD.
+    if cliente_pide_direccion(texto):
+        respuesta_bot = _respuesta_direccion_agencia(agencia, sesion)
+        sesion.historial.append(f"Bot: {respuesta_bot}")
+        _persistir_mensaje(sesion, "bot", respuesta_bot)
+        # No disparar lógica de cita por "pasame la dirección".
+        _entregar_respuesta_whatsapp(
+            agencia, sesion.telefono, respuesta_bot, via_whatsapp=via_whatsapp, sesion=sesion
+        )
+        return respuesta_bot
+
     inventario = obtener_inventario_agencia(sesion.agencia_id)
     directivas = _construir_directiva_vendedor(agencia, sesion)
     if _tiene_consulta_comercial(_normalizar_texto(texto)):
@@ -992,6 +1062,7 @@ def _procesar_mensaje(
         ),
         inventario_texto=inventario,
         contexto_temporal=_generar_contexto_temporal(),
+        datos_ubicacion=_armar_datos_ubicacion(agencia, sesion),
         directivas=directivas,
     )
 
