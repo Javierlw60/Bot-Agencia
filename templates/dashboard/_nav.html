@@ -8,6 +8,7 @@
 ] %}
 {% for id, href, label, icon in links %}
 <a href="{{ href }}" class="{{ link_class }}"
+   {% if pagina_activa != id %}rel="prefetch"{% endif %}
    style="{% if pagina_activa == id %}background: var(--surface); color: var(--title);{% else %}color: var(--muted);{% endif %}">
   <svg class="h-4 w-4 flex-shrink-0 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
     {% for path in icon.split('|') %}

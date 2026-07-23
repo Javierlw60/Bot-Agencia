@@ -82,6 +82,8 @@ def inicio():
 
 @app.get("/health")
 def health():
+    from keepalive import keepalive_habilitado
+
     motor = "postgres" if es_postgres() else ("sqlite" if es_sqlite() else "otro")
     destino = DATABASE_URL.split("@")[-1] if "@" in DATABASE_URL else DATABASE_URL
     return {
@@ -89,6 +91,7 @@ def health():
         "dashboard": "/auth/login",
         "recordatorios": "activo",
         "suscripcion_cron": "activo",
+        "keepalive": "activo" if keepalive_habilitado() else "inactivo",
         "database": {"motor": motor, "destino": destino},
         "static_writable": str(static_dir()),
         "mercadopago_webhook": "/api/mercadopago/webhook",

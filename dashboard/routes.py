@@ -131,15 +131,24 @@ def _metricas_agencia(
 ) -> dict:
     """Conteos reales desde la BD; única fuente de verdad para el dashboard."""
     hoy = obtener_fecha_hoy_argentina()
-    autos = _query_autos_agencia(db, agencia_id)
-    leads = db.query(ProspectoLead).filter(ProspectoLead.agencia_id == agencia_id)
+    filtros_auto = [Auto.agencia_id == agencia_id]
+    filtros_lead = [ProspectoLead.agencia_id == agencia_id]
     if sucursal_id:
-        autos = autos.filter(Auto.sucursal_id == sucursal_id)
-        leads = leads.filter(ProspectoLead.sucursal_id == sucursal_id)
+        filtros_auto.append(Auto.sucursal_id == sucursal_id)
+        filtros_lead.append(ProspectoLead.sucursal_id == sucursal_id)
+
+    total_autos = db.query(func.count(Auto.id)).filter(*filtros_auto).scalar() or 0
+    disponibles = (
+        db.query(func.count(Auto.id))
+        .filter(*filtros_auto, func.lower(Auto.estado) == "disponible")
+        .scalar()
+        or 0
+    )
+    total_leads = db.query(func.count(ProspectoLead.id)).filter(*filtros_lead).scalar() or 0
     return {
-        "total_autos": autos.count(),
-        "disponibles": autos.filter(func.lower(Auto.estado) == "disponible").count(),
-        "total_leads": leads.count(),
+        "total_autos": total_autos,
+        "disponibles": disponibles,
+        "total_leads": total_leads,
         "citas_hoy": len(_citas_del_dia(db, agencia_id, hoy, sucursal_id)),
     }
 
