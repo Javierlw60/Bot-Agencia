@@ -23,7 +23,30 @@ def _expandir_aliases_marca(texto: str) -> str:
 def _normalizar_linea_whatsapp(valor: str | None) -> str:
     if not valor:
         return ""
-    return re.sub(r"\D", "", str(valor))
+    return re.sub(r"\D", "", str(valor).strip())
+
+
+def _texto_linea(valor: str | None) -> str:
+    return str(valor).strip() if valor is not None else ""
+
+
+def _lineas_whatsapp_coinciden(guardado: str | None, buscado: str | None) -> bool:
+    """Compara Phone Number ID exacto o solo-dígitos (tolerante a basura)."""
+    a = _texto_linea(guardado)
+    b = _texto_linea(buscado)
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    na, nb = _normalizar_linea_whatsapp(a), _normalizar_linea_whatsapp(b)
+    return bool(na and nb and na == nb)
+
+
+def _es_placeholder_linea_bot(valor: str | None) -> bool:
+    texto = _texto_linea(valor)
+    if not texto:
+        return True
+    return texto.startswith("reg_") or texto.startswith("sin-linea")
 
 
 def _mapa_nombres_sucursales(db, agencia_id: int) -> dict[int, str]:
@@ -73,6 +96,166 @@ def _vendedor_principal_de_sucursal(db, sucursal: Sucursal | None) -> Vendedor |
     )
 
 
+def _buscar_agencia_por_phone_id(db, phone_number_id: str) -> Agencia | None:
+    buscado = _texto_linea(phone_number_id)
+    if not buscado:
+        return None
+
+    exacta = (
+        db.query(Agencia)
+        .filter(Agencia.whatsapp_phone_number_id == buscado)
+        .first()
+    )
+    if exacta:
+        return exacta
+
+    for candidata in db.query(Agencia).order_by(Agencia.id).all():
+        if _lineas_whatsapp_coinciden(candidata.whatsapp_phone_number_id, buscado):
+            return candidata
+    return None
+
+
+def _liberar_phone_id_en_equipo(db, agencia_id: int, phone_number_id: str) -> None:
+    """Saca el Phone Number ID de Meta de vendedores/sucursales de esa agencia."""
+    for vend in db.query(Vendedor).filter(Vendedor.agencia_id == agencia_id).all():
+        if _lineas_whatsapp_coinciden(vend.telefono_whatsapp, phone_number_id):
+            vend.telefono_whatsapp = f"sin-linea-{vend.id}"
+    for suc in db.query(Sucursal).filter(Sucursal.agencia_id == agencia_id).all():
+        if _lineas_whatsapp_coinciden(suc.telefono_whatsapp, phone_number_id):
+            suc.telefono_whatsapp = ""
+
+
+def _equipo_tiene_phone_id(db, agencia_id: int, phone_number_id: str) -> bool:
+    for vend in db.query(Vendedor).filter(Vendedor.agencia_id == agencia_id).all():
+        if _lineas_whatsapp_coinciden(vend.telefono_whatsapp, phone_number_id):
+            return True
+    for suc in db.query(Sucursal).filter(Sucursal.agencia_id == agencia_id).all():
+        if _lineas_whatsapp_coinciden(suc.telefono_whatsapp, phone_number_id):
+            return True
+    return False
+
+
+def _asignar_linea_bot_a_agencia(db, agencia: Agencia, phone_number_id: str) -> Agencia:
+    """Garantiza que la línea Meta quede en la agencia y no en el equipo."""
+    linea = _texto_linea(phone_number_id)
+    otra = (
+        db.query(Agencia)
+        .filter(
+            Agencia.id != agencia.id,
+            Agencia.whatsapp_phone_number_id == linea,
+        )
+        .first()
+    )
+    if otra:
+        # Otra agencia ya es dueña de este Phone Number ID.
+        _liberar_phone_id_en_equipo(db, agencia.id, linea)
+        db.commit()
+        return otra
+
+    if _texto_linea(agencia.whatsapp_phone_number_id) != linea:
+        agencia.whatsapp_phone_number_id = linea
+    _liberar_phone_id_en_equipo(db, agencia.id, linea)
+    db.commit()
+    db.refresh(agencia)
+    return agencia
+
+
+def _autofix_linea_bot_desde_equipo(db, phone_number_id: str) -> Agencia | None:
+    """
+    Si el Phone Number ID de Meta quedó pegado en un vendedor/sucursal (modelo viejo),
+    lo mueve a esa agencia para que el webhook vuelva a ruteuar.
+    """
+    buscado = _texto_linea(phone_number_id)
+    if not buscado:
+        return None
+
+    for vend in db.query(Vendedor).order_by(Vendedor.id).all():
+        if not _lineas_whatsapp_coinciden(vend.telefono_whatsapp, buscado):
+            continue
+        agencia = db.query(Agencia).filter(Agencia.id == vend.agencia_id).first()
+        if not agencia:
+            continue
+        print(
+            f"[WEBHOOK WA] Auto-fix: Phone Number ID {buscado!r} estaba en "
+            f"vendedor id={vend.id}; se asigna a agencia id={agencia.id} "
+            f"({agencia.nombre!r})."
+        )
+        return _asignar_linea_bot_a_agencia(db, agencia, buscado)
+
+    for suc in db.query(Sucursal).order_by(Sucursal.id).all():
+        if not _lineas_whatsapp_coinciden(suc.telefono_whatsapp, buscado):
+            continue
+        agencia = db.query(Agencia).filter(Agencia.id == suc.agencia_id).first()
+        if not agencia:
+            continue
+        print(
+            f"[WEBHOOK WA] Auto-fix: Phone Number ID {buscado!r} estaba en "
+            f"sucursal id={suc.id}; se asigna a agencia id={agencia.id} "
+            f"({agencia.nombre!r})."
+        )
+        return _asignar_linea_bot_a_agencia(db, agencia, buscado)
+
+    return None
+
+
+def migrar_lineas_bot_desde_equipo() -> int:
+    """Migración al arrancar: mueve IDs de Meta pegados en equipo → agencia."""
+    from whatsapp_linea import es_phone_number_id_meta
+
+    db = SessionLocal()
+    reparadas = 0
+    try:
+        vistos: set[str] = set()
+        candidatos: list[tuple[int, str]] = []
+        for vend in db.query(Vendedor).order_by(Vendedor.id).all():
+            tel = _texto_linea(vend.telefono_whatsapp)
+            if tel and es_phone_number_id_meta(tel) and tel not in vistos:
+                candidatos.append((vend.agencia_id, tel))
+                vistos.add(tel)
+        for suc in db.query(Sucursal).order_by(Sucursal.id).all():
+            tel = _texto_linea(suc.telefono_whatsapp)
+            if tel and es_phone_number_id_meta(tel) and tel not in vistos:
+                candidatos.append((suc.agencia_id, tel))
+                vistos.add(tel)
+
+        for agencia_id, linea in candidatos:
+            agencia = db.query(Agencia).filter(Agencia.id == agencia_id).first()
+            if not agencia:
+                continue
+            actual = _texto_linea(agencia.whatsapp_phone_number_id)
+            if _lineas_whatsapp_coinciden(actual, linea):
+                _liberar_phone_id_en_equipo(db, agencia.id, linea)
+                reparadas += 1
+                continue
+            if _es_placeholder_linea_bot(actual):
+                _asignar_linea_bot_a_agencia(db, agencia, linea)
+                reparadas += 1
+        if reparadas:
+            db.commit()
+        return reparadas
+    finally:
+        db.close()
+
+
+def _sucursal_y_vendedor_de_agencia(
+    db, agencia: Agencia
+) -> tuple[Sucursal | None, Vendedor | None]:
+    suc = (
+        db.query(Sucursal)
+        .filter(Sucursal.agencia_id == agencia.id, Sucursal.es_principal.is_(True))
+        .order_by(Sucursal.numero)
+        .first()
+    )
+    if not suc:
+        suc = (
+            db.query(Sucursal)
+            .filter(Sucursal.agencia_id == agencia.id)
+            .order_by(Sucursal.numero)
+            .first()
+        )
+    return suc, _vendedor_principal_de_sucursal(db, suc)
+
+
 def resolver_destino_por_receptor_whatsapp(
     phone_number_id: str,
 ) -> tuple[Agencia | None, Sucursal | None, Vendedor | None]:
@@ -80,40 +263,42 @@ def resolver_destino_por_receptor_whatsapp(
     Identifica AGENCIA → SUCURSAL principal → VENDEDOR principal.
 
     La línea de WhatsApp Business (Phone Number ID de Meta) pertenece solo a la
-    agencia. Los celulares de vendedores/sucursales no rutean mensajes entrantes.
+    agencia. Si quedó mal cargada en un vendedor/sucursal, se auto-repara.
     """
+    buscado = _texto_linea(phone_number_id)
+    if not buscado:
+        return None, None, None
+
     db = SessionLocal()
     try:
-        normalizado = _normalizar_linea_whatsapp(phone_number_id)
-
-        agencia = None
-        for candidata in db.query(Agencia).all():
-            id_ag = (candidata.whatsapp_phone_number_id or "").strip()
-            if not id_ag:
-                continue
-            if id_ag == phone_number_id or (
-                normalizado and _normalizar_linea_whatsapp(id_ag) == normalizado
-            ):
-                agencia = candidata
-                break
+        agencia = _buscar_agencia_por_phone_id(db, buscado)
+        if not agencia:
+            agencia = _autofix_linea_bot_desde_equipo(db, buscado)
+        elif _equipo_tiene_phone_id(db, agencia.id, buscado):
+            # La agencia ya tiene la línea; limpia duplicados residuales en el equipo.
+            _liberar_phone_id_en_equipo(db, agencia.id, buscado)
+            db.commit()
+            db.refresh(agencia)
 
         if not agencia:
             return None, None, None
 
-        suc = (
-            db.query(Sucursal)
-            .filter(Sucursal.agencia_id == agencia.id, Sucursal.es_principal.is_(True))
-            .order_by(Sucursal.numero)
-            .first()
+        # Materializar atributos antes de cerrar la sesión (evitar DetachedInstance).
+        _ = (
+            agencia.id,
+            agencia.nombre,
+            agencia.whatsapp_phone_number_id,
+            agencia.modo_respuesta,
+            agencia.nombre_bot,
+            agencia.nombre_agencia,
         )
-        if not suc:
-            suc = (
-                db.query(Sucursal)
-                .filter(Sucursal.agencia_id == agencia.id)
-                .order_by(Sucursal.numero)
-                .first()
-            )
-        return agencia, suc, _vendedor_principal_de_sucursal(db, suc)
+        suc, vend = _sucursal_y_vendedor_de_agencia(db, agencia)
+        if suc:
+            _ = (suc.id, suc.nombre, suc.telefono_whatsapp, suc.direccion)
+        if vend:
+            _ = (vend.id, vend.nombre, vend.telefono_whatsapp)
+        db.expunge_all()
+        return agencia, suc, vend
     finally:
         db.close()
 

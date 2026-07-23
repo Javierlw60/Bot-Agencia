@@ -91,6 +91,9 @@ def _imprimir_ids_registrados_en_bd(phone_id_buscado: str) -> None:
         print(f"{_LOG_PREFIX} --- IDs registrados en base de datos ---")
         print(f"{_LOG_PREFIX} .env WHATSAPP_PHONE_NUMBER_ID = {whatsapp_phone_number_id()!r}")
 
+        hallado_en_agencia = False
+        hallado_en_equipo = False
+
         if not agencias:
             print(f"{_LOG_PREFIX} (sin agencias en la BD)")
         for ag in agencias:
@@ -101,6 +104,8 @@ def _imprimir_ids_registrados_en_bd(phone_id_buscado: str) -> None:
                 or (normalizado_buscado and norm_ag == normalizado_buscado)
             )
             marca = " <-- COINCIDE" if coincide else ""
+            if coincide:
+                hallado_en_agencia = True
             print(
                 f"{_LOG_PREFIX}   Agencia id={ag.id} nombre={ag.nombre!r} "
                 f"whatsapp_phone_number_id={id_ag!r} normalizado={norm_ag!r}{marca}"
@@ -113,7 +118,9 @@ def _imprimir_ids_registrados_en_bd(phone_id_buscado: str) -> None:
                 tel == phone_id_buscado
                 or (normalizado_buscado and norm_tel == normalizado_buscado)
             )
-            marca = " <-- COINCIDE" if coincide else ""
+            marca = " <-- COINCIDE (debería estar en la AGENCIA, no en el vendedor)" if coincide else ""
+            if coincide:
+                hallado_en_equipo = True
             print(
                 f"{_LOG_PREFIX}   Vendedor id={ven.id} nombre={ven.nombre!r} "
                 f"telefono_whatsapp={tel!r} normalizado={norm_tel!r}{marca}"
@@ -126,10 +133,17 @@ def _imprimir_ids_registrados_en_bd(phone_id_buscado: str) -> None:
                 tel == phone_id_buscado
                 or (normalizado_buscado and norm_tel == normalizado_buscado)
             )
-            marca = " <-- COINCIDE" if coincide else ""
+            marca = " <-- COINCIDE (debería estar en la AGENCIA, no en la sucursal)" if coincide else ""
+            if coincide:
+                hallado_en_equipo = True
             print(
                 f"{_LOG_PREFIX}   Sucursal id={suc.id} nombre={suc.nombre!r} "
                 f"telefono_whatsapp={tel!r} normalizado={norm_tel!r}{marca}"
+            )
+        if hallado_en_equipo and not hallado_en_agencia:
+            print(
+                f"{_LOG_PREFIX} AVISO: el Phone Number ID está en vendedor/sucursal. "
+                "El ruteo intentará auto-reparar moviéndolo a la agencia."
             )
         print(f"{_LOG_PREFIX} --- fin comparación BD ---")
     finally:

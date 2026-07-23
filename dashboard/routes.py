@@ -1924,7 +1924,8 @@ async def guardar_configuracion(
 
         sucursal.nombre_comercial = nombre.strip() or None
         sucursal.direccion = direccion.strip() or None
-        if sucursal.es_principal:
+        # La dirección oficial del bot vive en la agencia; solo rellenarla si falta.
+        if sucursal.es_principal and sucursal.direccion and not agencia.direccion:
             agencia.direccion = sucursal.direccion
 
         db.commit()
@@ -1989,24 +1990,34 @@ async def guardar_configuracion_agencia(
 
         _liberar_linea_bot_en_equipo(db, agencia_id, linea_bot)
 
-        agencia.nombre_agencia = nombre_agencia.strip() or agencia.nombre
+        nombre_ok = nombre_agencia.strip() or agencia.nombre
+        agencia.nombre = nombre_ok
+        agencia.nombre_agencia = nombre_ok
         agencia.direccion = direccion_agencia.strip() or None
         agencia.whatsapp_phone_number_id = linea_bot
-        agencia.telefono_contacto = telefono_contacto.strip() or None
+
+        contacto = _normalizar_telefono(telefono_contacto)
+        if contacto and (
+            es_phone_number_id_meta(contacto)
+            or _normalizar_telefono(contacto) == linea_bot
+        ):
+            return RedirectResponse(
+                url=(
+                    f"/dashboard/{agencia_id}/configuracion"
+                    f"?sucursal={sucursal_id}&error=contacto_es_linea_bot"
+                ),
+                status_code=303,
+            )
+        agencia.telefono_contacto = contacto or None
         agencia.nombre_bot = nombre_bot.strip() or None
         agencia.color_primario = color_primario.strip() or "#3B82F6"
         agencia.modo_respuesta = normalizar_modo_respuesta(modo_respuesta)
 
+        # La identidad del bot vive en la agencia; la sucursal principal solo
+        # hereda dirección si está vacía (no pisa nombre comercial del bot).
         sucursal_principal = _resolver_sucursal_activa(db, agencia_id)
-        if sucursal_principal:
-            if agencia.direccion:
-                sucursal_principal.direccion = agencia.direccion
-            if not sucursal_principal.nombre_comercial:
-                sucursal_principal.nombre_comercial = agencia.nombre_agencia
-            if not sucursal_principal.asesor_virtual_nombre and agencia.nombre_bot:
-                sucursal_principal.asesor_virtual_nombre = agencia.nombre_bot
-            if agencia.color_primario:
-                sucursal_principal.color_primario = agencia.color_primario
+        if sucursal_principal and agencia.direccion and not sucursal_principal.direccion:
+            sucursal_principal.direccion = agencia.direccion
 
         db.commit()
         return RedirectResponse(
