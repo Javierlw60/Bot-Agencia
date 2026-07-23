@@ -279,11 +279,53 @@ def _procesar_un_mensaje(
     meta_metadata_id: str | None = None,
     fallback_url: str | None = None,
 ) -> dict[str, Any]:
+    from whatsapp_idempotencia import liberar_lock_mensaje, reclamar_mensaje_whatsapp
+
     telefono = str(msg.get("from") or "")
     if not telefono:
         print(f"{_LOG_PREFIX} Mensaje sin teléfono remitente (from vacío).")
         return {"ok": False, "motivo": "sin_telefono"}
 
+    wa_message_id = str(msg.get("id") or "").strip() or None
+    if not reclamar_mensaje_whatsapp(wa_message_id):
+        return {
+            "ok": True,
+            "duplicado": True,
+            "motivo": "mensaje_ya_procesado",
+            "whatsapp_message_id": wa_message_id,
+        }
+
+    try:
+        resultado = _procesar_un_mensaje_interno(
+            msg,
+            phone_number_id,
+            meta_metadata_id=meta_metadata_id,
+            fallback_url=fallback_url,
+            wa_message_id=wa_message_id,
+        )
+        if not resultado.get("ok"):
+            from whatsapp_idempotencia import liberar_reclamo_si_fallo
+
+            liberar_reclamo_si_fallo(wa_message_id)
+        else:
+            liberar_lock_mensaje(wa_message_id)
+        return resultado
+    except Exception:
+        from whatsapp_idempotencia import liberar_reclamo_si_fallo
+
+        liberar_reclamo_si_fallo(wa_message_id)
+        raise
+
+
+def _procesar_un_mensaje_interno(
+    msg: dict[str, Any],
+    phone_number_id: str,
+    *,
+    meta_metadata_id: str | None = None,
+    fallback_url: str | None = None,
+    wa_message_id: str | None = None,
+) -> dict[str, Any]:
+    telefono = str(msg.get("from") or "")
     _log_diagnostico_ruteo(
         phone_number_id,
         meta_metadata_id=meta_metadata_id,
@@ -309,7 +351,7 @@ def _procesar_un_mensaje(
                 telefono_destino=telefono,
                 mensaje=mensaje_bloqueo,
                 whatsapp_phone_number_id=linea_respuesta,
-                modo_respuesta=agencia.modo_respuesta,
+                modo_respuesta="texto",
                 imprimir_texto_en_consola=False,
             )
         return {"ok": False, "bloqueado": True, "phone_number_id": phone_number_id}
@@ -330,7 +372,7 @@ def _procesar_un_mensaje(
             agencia=agencia,
             telefono=telefono,
             media_id=msg["audio_id"],
-            whatsapp_message_id=msg.get("id"),
+            whatsapp_message_id=wa_message_id or msg.get("id"),
             sucursal=sucursal,
             vendedor=vendedor,
             phone_number_id_meta=phone_number_id,

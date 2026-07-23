@@ -373,6 +373,12 @@ def inicializar_base_de_datos():
     _migrar_estados_cita()
     _migrar_lineas_bot_a_agencia()
     _sembrar_usuario_demo()
+    try:
+        from whatsapp_idempotencia import asegurar_tabla_idempotencia_whatsapp
+
+        asegurar_tabla_idempotencia_whatsapp()
+    except Exception as exc:
+        print(f"[DB] Idempotencia WhatsApp: {exc}")
 
 
 def _migrar_lineas_bot_a_agencia() -> None:

@@ -84,7 +84,10 @@ def detectar_visita(texto: str, historial: list[str] | None = None) -> bool:
     tiene_dia = any(
         d in texto_norm for d in ["hoy", "manana", "mañana", "lunes", "martes", "miercoles", "jueves", "viernes"]
     )
-    tiene_hora_explicita = bool(re.search(r"\b\d{1,2}(:\d{2})?\s*(hs|h|horas?)?\b", texto_norm))
+    tiene_hora_explicita = bool(
+        _extraer_hora_explicita(texto_norm)
+        or re.search(r"\b\d{1,2}(:\d{2})?\s*(hs|h|horas?)?\b", texto_norm)
+    )
 
     if (tiene_horario or tiene_hora_explicita) and tiene_dia:
         return True
@@ -154,44 +157,85 @@ def _es_recordatorio_antes(texto_norm: str, inicio: int) -> bool:
     return bool(re.search(r"^\d{1,2}(?::\d{2})?\s*horas?\s+antes\b", ventana))
 
 
+HORAS_EN_PALABRAS = {
+    "una": 1,
+    "uno": 1,
+    "dos": 2,
+    "tres": 3,
+    "cuatro": 4,
+    "cinco": 5,
+    "seis": 6,
+    "siete": 7,
+    "ocho": 8,
+    "nueve": 9,
+    "diez": 10,
+    "once": 11,
+    "doce": 12,
+    "trece": 13,
+    "catorce": 14,
+    "quince": 15,
+    "dieciseis": 16,
+    "dieciséis": 16,
+    "diecisiete": 17,
+    "dieciocho": 18,
+    "diecinueve": 19,
+    "veinte": 20,
+}
+
+
+def _hora_desde_token(token: str) -> int | None:
+    token = (token or "").strip().lower()
+    if token.isdigit():
+        valor = int(token)
+        return valor if 0 <= valor <= 23 else None
+    # "dieciséis" ya normalizado pierde tilde → dieciseis
+    return HORAS_EN_PALABRAS.get(token)
+
+
 def _extraer_hora_explicita(texto_norm: str, *, solo_confirmacion: bool = False) -> datetime.time | None:
     """
     Extrae la hora de la cita.
 
-    Prioriza 'a las 10' / 'para las 10:00'.
+    Prioriza 'a las 10' / 'para las 10:00' / 'para las catorce'.
     Ignora franjas de atención (09:00-13:00) y '1 hora antes'.
     """
-    # 1) Confirmaciones explícitas: "a las 10", "para las 10:00", "tipo 10"
+    token_hora = r"(\d{1,2}|" + "|".join(sorted(HORAS_EN_PALABRAS.keys(), key=len, reverse=True)) + r")"
+
+    # 1) Confirmaciones explícitas: "a las 10", "para las catorce", "tipo 10"
     for match in re.finditer(
-        r"(?:a las?|para las?|tipo)\s*(\d{1,2})(?::(\d{2}))?",
+        rf"(?:a las?|para las?|tipo)\s*{token_hora}(?::(\d{{2}}))?",
         texto_norm,
     ):
         if _es_recordatorio_antes(texto_norm, match.start(1)):
             continue
-        horas = int(match.group(1))
+        horas = _hora_desde_token(match.group(1))
+        if horas is None:
+            continue
         minutos = int(match.group(2) or 0)
         if 0 <= horas <= 23 and 0 <= minutos <= 59:
             return datetime.time(horas, minutos)
 
     if solo_confirmacion:
-        # En mensajes del bot, solo aceptar confirmaciones de horario de cita.
         for match in re.finditer(
-            r"(?:te esperamos|quedamos|quedo|qued[oó]|confirmad[oa]|cita|"
-            r"reprogram|cambiamos|pasamos|la dejamos|la dej[eé])\b.{0,100}?"
-            r"(?:a las?|para las?)\s*(\d{1,2})(?::(\d{2}))?",
+            rf"(?:te esperamos|quedamos|quedo|qued[oó]|confirmad[oa]|cita|"
+            rf"reprogram|cambiamos|pasamos|la dejamos|la dej[eé])\b.{{0,100}}?"
+            rf"(?:a las?|para las?)\s*{token_hora}(?::(\d{{2}}))?",
             texto_norm,
         ):
-            horas = int(match.group(1))
+            horas = _hora_desde_token(match.group(1))
+            if horas is None:
+                continue
             minutos = int(match.group(2) or 0)
             if 0 <= horas <= 23 and 0 <= minutos <= 59:
                 return datetime.time(horas, minutos)
-        # También "a las 11" cerca de "te esperamos" sin orden estricto
         if re.search(r"\b(te esperamos|quedamos|cita|reprogram|cambiamos)\b", texto_norm):
             for match in re.finditer(
-                r"(?:a las?|para las?)\s*(\d{1,2})(?::(\d{2}))?",
+                rf"(?:a las?|para las?)\s*{token_hora}(?::(\d{{2}}))?",
                 texto_norm,
             ):
-                horas = int(match.group(1))
+                horas = _hora_desde_token(match.group(1))
+                if horas is None:
+                    continue
                 minutos = int(match.group(2) or 0)
                 if 0 <= horas <= 23 and 0 <= minutos <= 59:
                     return datetime.time(horas, minutos)
@@ -199,17 +243,23 @@ def _extraer_hora_explicita(texto_norm: str, *, solo_confirmacion: bool = False)
 
     # 2) HH:MM / N hs — pero NO franjas ni "N horas antes"
     for patron in (
-        r"(\d{1,2}):(\d{2})\s*(?:hs|h|horas?)?",
-        r"(\d{1,2})\s*(?:hs|horas)\b",
-        r"\b(\d{1,2})(?::(\d{2}))?\s*(?:hs|h|horas?)\b",
+        rf"(\d{{1,2}}):(\d{{2}})\s*(?:hs|h|horas?)?",
+        rf"{token_hora}\s*(?:hs|horas)\b",
+        rf"\b{token_hora}(?::(\d{{2}}))?\s*(?:hs|h|horas?)\b",
     ):
         for match in re.finditer(patron, texto_norm):
             if _es_franja_horaria(texto_norm, match.start(1)):
                 continue
             if _es_recordatorio_antes(texto_norm, match.start(1)):
                 continue
-            horas = int(match.group(1))
-            minutos = int(match.group(2)) if match.lastindex and match.lastindex >= 2 and match.group(2) else 0
+            horas = _hora_desde_token(match.group(1))
+            if horas is None:
+                continue
+            minutos = (
+                int(match.group(2))
+                if match.lastindex and match.lastindex >= 2 and match.group(2)
+                else 0
+            )
             if 0 <= horas <= 23 and 0 <= minutos <= 59:
                 return datetime.time(horas, minutos)
     return None
