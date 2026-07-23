@@ -68,18 +68,14 @@ Sin `DATABASE_URL`, en local se usa SQLite (`bot_agencias_multitenant.db`).
 
 ### Correo de verificación (registro)
 
-Sin estas variables el enlace **solo aparece en los logs** de Render.
+Proveedor: **Resend**. Sin `RESEND_API_KEY` el enlace solo aparece en los logs.
 
 | Variable | Descripción |
 |----------|-------------|
-| `SMTP_HOST` | Servidor SMTP (ej. `smtp.gmail.com`) |
-| `SMTP_PORT` | `587` (STARTTLS) o `465` (SSL) |
-| `SMTP_USER` / `SMTP_PASSWORD` | Credenciales SMTP |
-| `SMTP_FROM` | Remitente (ej. `noreply@bot-agencias.com.ar`) |
-| `RESEND_API_KEY` | Alternativa vía Resend |
-| `SENDGRID_API_KEY` | Alternativa vía SendGrid |
+| `RESEND_API_KEY` | API key de Resend (obligatoria en producción) |
+| `SMTP_FROM` | Remitente; default `noreply@bot-agencias.com.ar` |
 
-Prioridad: Resend → SendGrid → SMTP.
+En Resend tenés que verificar el dominio `bot-agencias.com.ar` para poder enviar desde ese remitente.
 
 ### WhatsApp Cloud API (producción)
 
@@ -98,7 +94,7 @@ Alias aceptados: `WHATSAPP_TOKEN`, `PHONE_NUMBER_ID`, `VERIFY_TOKEN`.
 - **Recordatorios:** `RECORDATORIOS_ACTIVOS`, `RECORDATORIOS_INTERVALO_MIN`
 - **Voz:** `TTS_VOZ`, `TTS_MAX_CARACTERES`, `OPENAI_API_KEY`, `STT_MOTOR`, `STT_IDIOMA`
 - **Mercado Pago:** `MERCADOPAGO_ACCESS_TOKEN`, `MERCADOPAGO_USER_ID`, etc.
-- **Correo de verificación:** `SMTP_HOST` / `SMTP_USER` / `SMTP_PASSWORD` / `SMTP_PORT`, o `RESEND_API_KEY`, o `SENDGRID_API_KEY`. Sin ninguno, el enlace solo se imprime en logs.
+- **Correo de verificación:** Resend (`RESEND_API_KEY`), remitente `noreply@bot-agencias.com.ar`. Sin API key, el enlace solo se imprime en logs.
 
 Consultá `.env.example` para la lista completa y comentarios de cada variable.
 
