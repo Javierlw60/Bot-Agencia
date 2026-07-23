@@ -111,16 +111,20 @@ def procesar_audio_whatsapp(
             sesion, sucursal, vendedor, phone_number_id_meta=phone_number_id_meta
         )
         sesion.entrada_fue_audio = True
-        auditoria_id = registrar_interaccion_audio(
-            agencia_id=agencia.id,
-            telefono=telefono,
-            audio_archivado=audio_archivado,
-            transcripcion=transcripcion,
-            mp_media_id=media_id,
-            whatsapp_message_id=whatsapp_message_id,
-            cliente_id=sesion.lead_id,
-        )
-        resultado["auditoria_id"] = auditoria_id
+        # La auditoría no debe frenar la respuesta al cliente (p.ej. VARCHAR corto).
+        try:
+            auditoria_id = registrar_interaccion_audio(
+                agencia_id=agencia.id,
+                telefono=telefono,
+                audio_archivado=audio_archivado,
+                transcripcion=transcripcion,
+                mp_media_id=media_id,
+                whatsapp_message_id=whatsapp_message_id,
+                cliente_id=sesion.lead_id,
+            )
+            resultado["auditoria_id"] = auditoria_id
+        except Exception as exc:
+            print(f"[STT] Auditoría de audio falló (se continúa igual): {exc}")
 
         _enviar_bienvenida_inicial(sesion, agencia, via_whatsapp=True)
         respuesta = _procesar_mensaje(

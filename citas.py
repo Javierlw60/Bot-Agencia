@@ -464,8 +464,8 @@ def detectar_cambio_horario(texto: str) -> bool:
     return bool(
         re.search(
             r"\b("
-            r"cambi|reprogram|pasalo|pasala|pasame|mejor a|"
-            r"otra hora|otro horario|en vez de|en lugar de|"
+            r"cambi|reprogram|pasalo|pasala|pasarla|pasarlo|pasame|pasamos|pasar|"
+            r"mejor a|otra hora|otro horario|en vez de|en lugar de|"
             r"antes a las|despues a las|después a las"
             r")\b",
             texto_norm,
@@ -504,6 +504,9 @@ def procesar_cita_si_corresponde(sesion) -> int | None:
     Importante: si ya existe una cita en BD, cualquier hora nueva explícita
     ("a las 11", "cambiá a las 11") la actualiza aunque el bot solo lo diga
     en el chat.
+
+    La hora del **cliente** gana siempre frente a la del bot (Gemini a veces
+    repite la hora vieja al decir "listo").
     """
     ultimo_mensaje = ""
     ultimo_bot = ""
@@ -519,26 +522,34 @@ def procesar_cita_si_corresponde(sesion) -> int | None:
     if cita_existente:
         sesion.cita_registrada_id = cita_existente.id
 
+    hora_cliente = _extraer_hora_explicita(_normalizar(ultimo_mensaje))
     quiere_visita = detectar_visita(ultimo_mensaje, sesion.historial)
     quiere_cambiar = bool(cita_existente) and (
         detectar_cambio_horario(ultimo_mensaje)
-        or detectar_cambio_horario(ultimo_bot)
+        or (not hora_cliente and detectar_cambio_horario(ultimo_bot))
     )
 
     if not quiere_visita and not quiere_cambiar:
         return sesion.cita_registrada_id
 
-    # Para actualizar, priorizar hora del último mensaje del cliente; si el bot
-    # acaba de confirmar "a las 11", también cuenta.
+    # Priorizar SIEMPRE la hora explícita del cliente.
     texto_para_hora = ultimo_mensaje
-    if quiere_cambiar and not _extraer_hora_explicita(_normalizar(ultimo_mensaje)):
+    if not hora_cliente and quiere_cambiar:
         if _extraer_hora_explicita(_normalizar(ultimo_bot), solo_confirmacion=True):
             texto_para_hora = ultimo_bot
 
+    # Al calcular, no dejar que el historial (hora vieja / reply del bot) pise
+    # la hora que el cliente acaba de pedir.
+    historial_para_hora = list(sesion.historial)
+    if hora_cliente:
+        historial_para_hora = [
+            l for l in historial_para_hora if not l.startswith("Bot:")
+        ][-6:]
+
     fecha_hora = _extraer_fecha_hora_para_actualizar(
-        texto_para_hora, sesion.historial, cita_existente
+        texto_para_hora, historial_para_hora, cita_existente
     )
-    if not fecha_hora and quiere_cambiar and ultimo_bot:
+    if not fecha_hora and quiere_cambiar and ultimo_bot and not hora_cliente:
         fecha_hora = _extraer_fecha_hora_para_actualizar(
             ultimo_bot, sesion.historial, cita_existente
         )

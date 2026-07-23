@@ -140,8 +140,9 @@ class HistorialConversacion(Base):
     audio_path = Column(String(500), nullable=False)
     audio_url = Column(String(500), nullable=True)
     transcripcion = Column(Text, nullable=False)
-    mp_media_id = Column(String(80), nullable=True)
-    whatsapp_message_id = Column(String(80), nullable=True)
+    mp_media_id = Column(String(120), nullable=True)
+    # wamid de Meta suele superar 80 caracteres.
+    whatsapp_message_id = Column(String(200), nullable=True)
     fecha_creacion = Column(DateTime, default=datetime.datetime.utcnow)
 
 
@@ -316,6 +317,41 @@ def _agregar_columna_si_falta(nombre_tabla: str, nombre_columna: str, tipo_sql: 
                 pass
 
 
+def _ampliar_varchar_si_corta(
+    nombre_tabla: str,
+    nombre_columna: str,
+    longitud: int,
+) -> None:
+    """Ensancha VARCHAR existentes (create_all no altera anchos en Postgres)."""
+    if not _tabla_tiene_columna(nombre_tabla, nombre_columna):
+        return
+    tipo_sql = f"VARCHAR({longitud})"
+    with engine.begin() as conn:
+        try:
+            if es_postgres():
+                conn.execute(
+                    text(
+                        f"ALTER TABLE {nombre_tabla} "
+                        f"ALTER COLUMN {nombre_columna} TYPE {tipo_sql}"
+                    )
+                )
+            elif es_sqlite():
+                # SQLite no aplica límites VARCHAR de forma estricta; no-op.
+                pass
+            else:
+                conn.execute(
+                    text(
+                        f"ALTER TABLE {nombre_tabla} "
+                        f"MODIFY COLUMN {nombre_columna} {tipo_sql}"
+                    )
+                )
+        except Exception as exc:
+            print(
+                f"[DB] No se pudo ampliar {nombre_tabla}.{nombre_columna} "
+                f"a {tipo_sql}: {exc}"
+            )
+
+
 def inicializar_base_de_datos():
     Base.metadata.create_all(bind=engine)
     _migrar_columnas_leads()
@@ -425,6 +461,15 @@ def _migrar_tabla_pagos_mp():
 
 def _migrar_tabla_historial_conversaciones():
     Base.metadata.tables["historial_conversaciones"].create(bind=engine, checkfirst=True)
+    # Producción tenía VARCHAR(80): audio_url (~93) y wamid (~82+) reventaban el INSERT.
+    for columna, largo in (
+        ("audio_path", 500),
+        ("audio_url", 500),
+        ("mp_media_id", 120),
+        ("whatsapp_message_id", 200),
+        ("telefono_cliente", 30),
+    ):
+        _ampliar_varchar_si_corta("historial_conversaciones", columna, largo)
 
 
 def _migrar_tablas_auth():
