@@ -66,7 +66,7 @@
       </span>
       {% endif %}
     </div>
-    <p class="page-subtitle mt-0.5">Datos de la agencia, sucursales e identidad del bot.</p>
+    <p class="page-subtitle mt-0.5">Línea del bot de la agencia, sucursales y equipo de contacto.</p>
   </div>
 </div>
 
@@ -74,29 +74,40 @@
 {% set _err = request.query_params.get('error') %}
 {% if _ok == 'guardado' %}
 <div class="ui-card mb-3 px-4 py-2.5 text-sm" style="color: #6ee7b7;">Cambios guardados correctamente.</div>
+{% elif _ok == 'agencia' %}
+<div class="ui-card mb-3 px-4 py-2.5 text-sm" style="color: #6ee7b7;">Datos de la agencia guardados. El bot usa esta línea de WhatsApp Business.</div>
 {% elif _ok == 'sucursal' %}
 <div class="ui-card mb-3 px-4 py-2.5 text-sm" style="color: #6ee7b7;">Nueva sucursal creada.</div>
 {% elif _ok == 'vendedor' %}
-<div class="ui-card mb-3 px-4 py-2.5 text-sm" style="color: #6ee7b7;">Vendedor agregado. Configurá su línea e identidad.</div>
+<div class="ui-card mb-3 px-4 py-2.5 text-sm" style="color: #6ee7b7;">Vendedor agregado. Completá su nombre y celular de contacto.</div>
 {% elif _ok == 'vendedor_eliminado' %}
 <div class="ui-card mb-3 px-4 py-2.5 text-sm" style="color: #6ee7b7;">Vendedor eliminado.</div>
 {% elif _err == 'telefono_duplicado' %}
-<div class="ui-card mb-3 px-4 py-2.5 text-sm" style="color: #fca5a5;">Ese teléfono ya está en uso por otro vendedor. Los números no se pueden repetir.</div>
+<div class="ui-card mb-3 px-4 py-2.5 text-sm" style="color: #fca5a5;">Ese celular ya está en uso por otro vendedor.</div>
+{% elif _err == 'telefono_es_linea_bot' %}
+<div class="ui-card mb-3 px-4 py-2.5 text-sm" style="color: #fca5a5;">Ese valor es el Phone Number ID del bot. Ponelo en «Datos de la agencia» y acá usá el celular real del vendedor (ej. 54911…).</div>
+{% elif _err == 'telefono_invalido' %}
+<div class="ui-card mb-3 px-4 py-2.5 text-sm" style="color: #fca5a5;">Ingresá un celular válido con código de país (ej. 5491163052331) o dejalo vacío.</div>
+{% elif _err == 'linea_bot_duplicada' %}
+<div class="ui-card mb-3 px-4 py-2.5 text-sm" style="color: #fca5a5;">Ese Phone Number ID ya está en uso por otra agencia.</div>
+{% elif _err == 'linea_bot_vacia' %}
+<div class="ui-card mb-3 px-4 py-2.5 text-sm" style="color: #fca5a5;">El Phone Number ID de WhatsApp es obligatorio.</div>
+{% elif _err == 'linea_bot_invalida' %}
+<div class="ui-card mb-3 px-4 py-2.5 text-sm" style="color: #fca5a5;">Ingresá el Phone Number ID de Meta (no un celular 549…).</div>
 {% elif _err == 'ultimo_vendedor' %}
 <div class="ui-card mb-3 px-4 py-2.5 text-sm" style="color: #fca5a5;">No podés eliminar el único vendedor de la sucursal.</div>
 {% endif %}
 
-{% if vendedor_activo and vendedor_sin_linea %}
+{% if agencia_sin_linea_bot %}
 <div class="ui-card mb-3 flex flex-col gap-2 border px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
      style="border-color: color-mix(in srgb, #f59e0b 45%, var(--border)); background: color-mix(in srgb, #f59e0b 10%, var(--card));">
   <div>
-    <p class="text-sm font-semibold" style="color: var(--title);">Configurá el Vendedor Principal</p>
+    <p class="text-sm font-semibold" style="color: var(--title);">Falta la línea del bot</p>
     <p class="mt-0.5 text-sm" style="color: var(--muted);">
-      Esta sucursal necesita al menos un vendedor con teléfono de WhatsApp para que el bot responda correctamente.
-      Completá la línea del <strong style="color: var(--title);">{{ vendedor_activo.nombre }}</strong> abajo.
+      Pegá el <strong style="color: var(--title);">Phone Number ID</strong> de Meta en «Datos de la agencia» para que WhatsApp llegue al bot.
     </p>
   </div>
-  <a href="#form-configuracion"
+  <a href="#form-agencia"
      class="shrink-0 rounded-md px-3 py-2 text-sm font-medium transition hover:opacity-90"
      style="color: var(--title); border: 1px solid color-mix(in srgb, #f59e0b 40%, var(--border)); background: color-mix(in srgb, #f59e0b 14%, var(--card));">
     Completar ahora →
@@ -104,13 +115,126 @@
 </div>
 {% endif %}
 
+<div class="grid grid-cols-1 gap-3 lg:grid-cols-2 lg:items-start lg:gap-4 mb-3">
+  <form method="post" action="/dashboard/{{ agencia.id }}/configuracion/agencia"
+        id="form-agencia" class="ui-card js-save-form flex flex-col gap-3 p-4 sm:p-5" novalidate>
+    <input type="hidden" name="sucursal_id" value="{{ sucursal_activa.id }}">
+    <div>
+      <h2 class="text-base font-semibold" style="color: var(--title);">Datos de la agencia</h2>
+      <p class="mt-0.5 text-sm" style="color: var(--muted);">
+        Línea oficial de WhatsApp Business e identidad del bot. El bot atiende esta línea; los vendedores no.
+      </p>
+    </div>
+    <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <label class="block sm:col-span-2">
+        <span class="ui-label">Nombre comercial de la agencia</span>
+        <input name="nombre_agencia" required
+               value="{{ agencia.nombre_agencia or agencia.nombre or '' }}"
+               placeholder="Ej: Agencia Luna" class="ui-input">
+      </label>
+      <label class="block sm:col-span-2">
+        <span class="ui-label">Dirección de la agencia</span>
+        <input name="direccion_agencia" value="{{ agencia.direccion or sucursal_activa.direccion or '' }}"
+               placeholder="Ej: Roma 751, Garín" class="ui-input">
+      </label>
+      <label class="block">
+        <span class="ui-label">Phone Number ID de WhatsApp (línea del bot) *</span>
+        <input name="whatsapp_phone_number_id" required inputmode="numeric"
+               value="{{ agencia.whatsapp_phone_number_id or '' }}"
+               placeholder="Ej: 1157912357408413" class="ui-input">
+      </label>
+      <label class="block">
+        <span class="ui-label">Teléfono de contacto de la agencia</span>
+        <input name="telefono_contacto" inputmode="tel"
+               value="{{ agencia.telefono_contacto or '' }}"
+               placeholder="Ej: 11 4567-8900" class="ui-input">
+      </label>
+      <label class="block">
+        <span class="ui-label">Asesor virtual (nombre del bot)</span>
+        <input id="nombre_bot" name="nombre_bot" maxlength="80"
+               value="{{ agencia.nombre_bot or '' }}"
+               placeholder="{{ nombre_bot_default }}" class="ui-input">
+      </label>
+      <label class="block">
+        <span class="ui-label">Modo WhatsApp</span>
+        <select name="modo_respuesta" class="ui-select">
+          {% for valor, etiqueta in modos_respuesta %}
+          <option value="{{ valor }}" {% if modo_respuesta_actual == valor %}selected{% endif %}>{{ etiqueta }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="block">
+        <span class="ui-label">Color primario</span>
+        <div class="flex items-center gap-2">
+          <input id="color_primario" name="color_primario" type="color"
+                 value="{{ color_primario or '#3B82F6' }}"
+                 class="h-9 w-12 cursor-pointer rounded-md p-0.5"
+                 style="border: 1px solid var(--border); background: var(--surface);">
+          <span id="color_hex" class="font-mono text-xs" style="color: var(--muted);">{{ color_primario or '#3B82F6' }}</span>
+        </div>
+      </label>
+      <label class="block">
+        <span class="ui-label">Logo del bot</span>
+        <input id="archivo_logo" type="file" accept="image/*" class="hidden">
+        <button type="button" id="btn-subir-logo" class="btn-upload">
+          <svg class="h-4 w-4 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+          <span id="btn-subir-logo-texto">Subir logo</span>
+        </button>
+        <div id="logo-estado" class="upload-status hidden">
+          <span id="logo-spinner" class="form-spinner"></span>
+          <span id="logo-estado-texto">Subiendo logo...</span>
+        </div>
+      </label>
+    </div>
+    <div id="logo-thumb-wrap" class="{% if not logo_bot_actual %}hidden{% endif %} flex items-center gap-3 rounded-md px-3 py-1.5"
+         style="background: var(--surface); border: 1px solid var(--border);">
+      <img id="logo-thumb" src="{{ logo_bot_actual or '' }}" alt="Logo" class="h-10 w-10 rounded-md object-cover" style="border: 1px solid var(--border);">
+      <span class="text-xs" style="color: var(--muted);">Logo actual</span>
+    </div>
+    <p class="-mt-1 text-xs" style="color: var(--muted);">
+      El Phone Number ID lo da Meta en WhatsApp → API Setup. No es el celular de un vendedor.
+    </p>
+    <button type="submit" class="btn-primary mt-1 w-full py-2.5 sm:w-auto sm:self-start sm:px-6">Guardar agencia</button>
+  </form>
+
+  <div class="flex w-full flex-col gap-2 lg:sticky lg:top-4 lg:self-start">
+    <p class="ui-label" style="margin-bottom:0;">Vista previa · WhatsApp</p>
+    <div id="wa-preview" class="ui-card mx-auto w-full max-w-sm overflow-hidden p-0 shadow-2xl shadow-black/50">
+      <div class="flex items-center gap-3 px-4 py-2.5" style="background: #075E54;">
+        <div class="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-white/10">
+          <img id="wa-avatar-img" src="{{ logo_bot_actual or '' }}" alt=""
+               class="{% if not logo_bot_actual %}hidden{% endif %} h-full w-full object-cover">
+          <span id="wa-avatar-iniciales" class="{% if logo_bot_actual %}hidden{% endif %} text-xs font-bold text-white">{{ (asesor_virtual_actual or agencia.nombre)[:2]|upper }}</span>
+        </div>
+        <div class="min-w-0 flex-1">
+          <p id="wa-contacto" class="truncate text-sm font-medium text-white">{{ asesor_virtual_actual }}</p>
+          <p class="text-[11px] text-white/70">en línea</p>
+        </div>
+      </div>
+      <div class="min-h-[240px] px-3 py-3 sm:min-h-[260px]" style="background: #0b141a url('data:image/svg+xml,%3Csvg width=%2260%22 height=%2260%22 xmlns=%22http://www.w3.org/2000/svg%22%3E%3Cpath d=%22M30 0L60 30L30 60L0 30z%22 fill=%22%23111b21%22 fill-opacity=%220.4%22/%3E%3C/svg%3E');">
+        <div class="flex justify-start">
+          <div class="max-w-[88%] rounded-lg rounded-tl-none px-3 py-2 shadow-md" style="background: #1f2c34;">
+            <p id="preview-saludo" class="text-[13px] leading-snug text-[#e9edef]">{{ mensaje_bienvenida }}</p>
+          </div>
+        </div>
+      </div>
+      <div class="flex items-center gap-2 px-3 py-1.5" style="background: #1f2c34;">
+        <div class="flex-1 rounded-full px-4 py-1.5 text-xs text-white/30" style="background: #2a3942;">Mensaje</div>
+        <div class="flex h-9 w-9 items-center justify-center rounded-full" style="background: #00a884;">
+          <svg class="h-4 w-4 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <section class="ui-card mb-3 overflow-hidden">
   <div class="sucursales-section-head px-4 py-3 sm:px-5">
     <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
       <div>
         <h2 class="text-base font-semibold" style="color: var(--title);">Sucursales</h2>
         <p class="mt-0.5 text-sm" style="color: color-mix(in srgb, var(--title) 72%, var(--muted));">
-          Editando identidad de <strong style="color: var(--title);">{{ nombre_comercial_actual }}</strong>
+          Sedes de <strong style="color: var(--title);">{{ nombre_comercial_actual }}</strong>
         </p>
       </div>
       <form method="post" action="/dashboard/{{ agencia.id }}/configuracion/sucursales">
@@ -144,7 +268,7 @@
   <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
     <label class="block sm:col-span-2">
       <span class="ui-label">Nombre comercial de la sucursal</span>
-      <input name="nombre" required value="{{ sucursal_activa.nombre_comercial or nombre_comercial_actual }}" class="ui-input">
+      <input id="nombre_comercial" name="nombre" required value="{{ sucursal_activa.nombre_comercial or nombre_comercial_actual }}" class="ui-input">
     </label>
     <label class="block sm:col-span-2">
       <span class="ui-label">Dirección de la sucursal</span>
@@ -161,7 +285,7 @@
       <div>
         <h2 class="text-base font-semibold" style="color: var(--title);">Equipo de Ventas</h2>
         <p class="mt-0.5 text-sm" style="color: color-mix(in srgb, var(--title) 72%, var(--muted));">
-          Vendedores de <strong style="color: var(--title);">{{ sucursal_activa.nombre }}</strong> · cada uno con su línea de WhatsApp e identidad propia.
+          Contactos humanos de <strong style="color: var(--title);">{{ sucursal_activa.nombre }}</strong> · celular real para citas. El bot atiende la línea de la agencia.
         </p>
       </div>
       <form method="post" action="/dashboard/{{ agencia.id }}/configuracion/vendedores">
@@ -182,12 +306,8 @@
       <a href="/dashboard/{{ agencia.id }}/configuracion?sucursal={{ sucursal_activa.id }}&vendedor={{ vend.id }}"
          class="flex min-w-0 flex-1 items-center gap-3">
         <span class="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full"
-              style="background: color-mix(in srgb, {{ vend.color_primario or '#3B82F6' }} 22%, var(--card)); border: 1px solid var(--border);">
-          {% if vend.logo_url %}
-          <img src="{{ vend.logo_url }}" alt="" class="h-full w-full object-cover">
-          {% else %}
-          <span class="text-xs font-bold" style="color: var(--title);">{{ (vend.asesor_virtual_nombre or vend.nombre or 'V')[:2]|upper }}</span>
-          {% endif %}
+              style="background: color-mix(in srgb, {{ color_primario or '#3B82F6' }} 22%, var(--card)); border: 1px solid var(--border);">
+          <span class="text-xs font-bold" style="color: var(--title);">{{ (vend.nombre or 'V')[:2]|upper }}</span>
         </span>
         <span class="min-w-0 flex-1">
           <span class="flex items-center gap-2">
@@ -198,8 +318,7 @@
             {% endif %}
           </span>
           <span class="block truncate text-xs" style="color: var(--muted);">
-            {% if vend.asesor_virtual_nombre %}{{ vend.asesor_virtual_nombre }} · {% endif %}
-            {% if _tel %}{{ _tel }}{% else %}Sin línea configurada{% endif %}
+            {% if _tel %}{{ _tel }}{% else %}Sin celular{% endif %}
           </span>
         </span>
       </a>
@@ -220,11 +339,11 @@
     <div class="rounded-lg px-4 py-8 text-center" style="border: 1px dashed var(--border);">
       <p class="text-sm font-medium" style="color: var(--title);">Sin vendedores en esta sucursal</p>
       <p class="mt-1 text-sm" style="color: var(--muted);">
-        Creá el Vendedor Principal para heredar la línea de WhatsApp y la identidad del bot.
+        Creá el Vendedor Principal como contacto humano para citas (el bot ya atiende la línea de la agencia).
       </p>
       <form method="post" action="/dashboard/{{ agencia.id }}/configuracion/vendedores" class="mt-4 inline-block">
         <input type="hidden" name="sucursal_id" value="{{ sucursal_activa.id }}">
-        <button type="submit" class="btn-primary px-5 py-2.5 text-sm">Configurar Vendedor Principal</button>
+        <button type="submit" class="btn-primary px-5 py-2.5 text-sm">Agregar Vendedor Principal</button>
       </form>
     </div>
     {% endif %}
@@ -233,139 +352,47 @@
 
 {% if vendedor_activo %}
 {% set _tel_v = tel_visible(vendedor_activo.telefono_whatsapp)|trim %}
-<div class="grid grid-cols-1 gap-3 lg:grid-cols-2 lg:items-start lg:gap-4">
-  <form method="post" action="/dashboard/{{ agencia.id }}/configuracion/vendedores/{{ vendedor_activo.id }}"
-        id="form-configuracion" class="ui-card js-save-form flex flex-col gap-3 p-4 sm:p-5" novalidate>
-    <input type="hidden" name="sucursal_id" value="{{ sucursal_activa.id }}">
+<form method="post" action="/dashboard/{{ agencia.id }}/configuracion/vendedores/{{ vendedor_activo.id }}"
+      id="form-configuracion" class="ui-card js-save-form mb-3 flex flex-col gap-3 p-4 sm:p-5" novalidate>
+  <input type="hidden" name="sucursal_id" value="{{ sucursal_activa.id }}">
 
-    <div>
-      <h2 class="text-base font-semibold" style="color: var(--title);">Identidad del bot</h2>
-      <p class="mt-0.5 text-sm" style="color: var(--muted);">
-        Configurando a <strong style="color: var(--title);">{{ vendedor_activo.nombre }}</strong> en {{ sucursal_activa.nombre }}.
-      </p>
-    </div>
-
-    <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-      <label class="block">
-        <span class="ui-label">Nombre del vendedor (interno)</span>
-        <input id="nombre" name="nombre" maxlength="100" value="{{ vendedor_activo.nombre or '' }}"
-               placeholder="Ej: Juan Pérez" class="ui-input">
-      </label>
-      <label class="block">
-        <span class="ui-label">Teléfono de WhatsApp del vendedor *</span>
-        <input name="telefono_whatsapp" required inputmode="tel" value="{{ _tel_v }}"
-               placeholder="Ej: 5491163052331 (línea exclusiva)" class="ui-input">
-      </label>
-    </div>
-    <p class="-mt-1 text-xs" style="color: var(--muted);">
-      Línea única del vendedor. Los mensajes que lleguen a este número responden con su identidad. No se puede repetir entre vendedores.
+  <div>
+    <h2 class="text-base font-semibold" style="color: var(--title);">Datos del vendedor</h2>
+    <p class="mt-0.5 text-sm" style="color: var(--muted);">
+      Contacto humano de <strong style="color: var(--title);">{{ vendedor_activo.nombre }}</strong> en {{ sucursal_activa.nombre }}.
+      No atienden WhatsApp: el bot gestiona la línea de la agencia.
     </p>
-
-    <div class="border-t pt-3" style="border-color: var(--border);">
-      <h2 class="text-base font-semibold" style="color: var(--title);">Personalidad del asesor</h2>
-    </div>
-
-    <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-      <label class="block">
-        <span class="ui-label">Asesor virtual (nombre del bot)</span>
-        <input id="nombre_bot" name="nombre_bot" maxlength="80"
-               value="{{ vendedor_activo.asesor_virtual_nombre or '' }}"
-               placeholder="{{ nombre_bot_default }}" class="ui-input">
-      </label>
-      <label class="block">
-        <span class="ui-label">Nombre comercial que dice el bot</span>
-        <input id="nombre_comercial" name="nombre_comercial" maxlength="100"
-               value="{{ vendedor_activo.nombre_comercial or '' }}"
-               placeholder="{{ nombre_comercial_actual }}" class="ui-input">
-      </label>
-    </div>
-
-    <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-      <label class="block">
-        <span class="ui-label">Modo WhatsApp</span>
-        <select name="modo_respuesta" class="ui-select">
-          {% for valor, etiqueta in modos_respuesta %}
-          <option value="{{ valor }}" {% if modo_respuesta_actual == valor %}selected{% endif %}>{{ etiqueta }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      <label class="block">
-        <span class="ui-label">Color primario</span>
-        <div class="flex items-center gap-2">
-          <input id="color_primario" name="color_primario" type="color"
-                 value="{{ color_primario or '#3B82F6' }}"
-                 class="h-9 w-12 cursor-pointer rounded-md p-0.5"
-                 style="border: 1px solid var(--border); background: var(--surface);">
-          <span id="color_hex" class="font-mono text-xs" style="color: var(--muted);">{{ color_primario or '#3B82F6' }}</span>
-        </div>
-      </label>
-    </div>
-
-    <label class="block">
-      <span class="ui-label">Logo</span>
-      <input id="archivo_logo" type="file" accept="image/*" class="hidden">
-      <button type="button" id="btn-subir-logo" class="btn-upload">
-        <svg class="h-4 w-4 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
-        <span id="btn-subir-logo-texto">Subir logo</span>
-      </button>
-      <div id="logo-estado" class="upload-status hidden">
-        <span id="logo-spinner" class="form-spinner"></span>
-        <span id="logo-estado-texto">Subiendo logo...</span>
-      </div>
-    </label>
-
-    <div id="logo-thumb-wrap" class="{% if not logo_bot_actual %}hidden{% endif %} flex items-center gap-3 rounded-md px-3 py-1.5"
-         style="background: var(--surface); border: 1px solid var(--border);">
-      <img id="logo-thumb" src="{{ logo_bot_actual or '' }}" alt="Logo" class="h-10 w-10 rounded-md object-cover" style="border: 1px solid var(--border);">
-      <span class="text-xs" style="color: var(--muted);">Logo actual</span>
-    </div>
-
-    <button type="submit" id="btn-guardar" class="btn-primary mt-1 w-full py-2.5" data-saving-text="Guardando...">
-      Guardar vendedor
-    </button>
-  </form>
-
-  <div class="flex w-full flex-col gap-2 lg:sticky lg:top-4 lg:self-start">
-    <p class="ui-label" style="margin-bottom:0;">Vista previa · WhatsApp</p>
-    <div id="wa-preview" class="ui-card mx-auto w-full max-w-sm overflow-hidden p-0 shadow-2xl shadow-black/50">
-      <div class="flex items-center gap-3 px-4 py-2.5" style="background: #075E54;">
-        <div class="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-white/10">
-          <img id="wa-avatar-img" src="{{ logo_bot_actual or '' }}" alt=""
-               class="{% if not logo_bot_actual %}hidden{% endif %} h-full w-full object-cover">
-          <span id="wa-avatar-iniciales" class="{% if logo_bot_actual %}hidden{% endif %} text-xs font-bold text-white">{{ (asesor_virtual_actual or agencia.nombre)[:2]|upper }}</span>
-        </div>
-        <div class="min-w-0 flex-1">
-          <p id="wa-contacto" class="truncate text-sm font-medium text-white">{{ asesor_virtual_actual }}</p>
-          <p class="text-[11px] text-white/70">en línea</p>
-        </div>
-      </div>
-      <div class="min-h-[240px] px-3 py-3 sm:min-h-[260px]" style="background: #0b141a url('data:image/svg+xml,%3Csvg width=%2260%22 height=%2260%22 xmlns=%22http://www.w3.org/2000/svg%22%3E%3Cpath d=%22M30 0L60 30L30 60L0 30z%22 fill=%22%23111b21%22 fill-opacity=%220.4%22/%3E%3C/svg%3E');">
-        <div class="flex justify-start">
-          <div class="max-w-[88%] rounded-lg rounded-tl-none px-3 py-2 shadow-md" style="background: #1f2c34;">
-            <p id="preview-saludo" class="text-[13px] leading-snug text-[#e9edef]">{{ mensaje_bienvenida }}</p>
-          </div>
-        </div>
-      </div>
-      <div class="flex items-center gap-2 px-3 py-1.5" style="background: #1f2c34;">
-        <div class="flex-1 rounded-full px-4 py-1.5 text-xs text-white/30" style="background: #2a3942;">Mensaje</div>
-        <div class="flex h-9 w-9 items-center justify-center rounded-full" style="background: #00a884;">
-          <svg class="h-4 w-4 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
-        </div>
-      </div>
-    </div>
   </div>
-</div>
+
+  <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+    <label class="block">
+      <span class="ui-label">Nombre del vendedor</span>
+      <input id="nombre" name="nombre" maxlength="100" value="{{ vendedor_activo.nombre or '' }}"
+             placeholder="Ej: Juan Pérez" class="ui-input">
+    </label>
+    <label class="block">
+      <span class="ui-label">Celular personal</span>
+      <input name="telefono_whatsapp" inputmode="tel" value="{{ _tel_v }}"
+             placeholder="Ej: 5491163052331 (opcional)" class="ui-input">
+    </label>
+  </div>
+  <p class="-mt-1 text-xs" style="color: var(--muted);">
+    Celular real para contacto interno o avisos de citas. No pegues acá el Phone Number ID de Meta.
+  </p>
+
+  <button type="submit" id="btn-guardar" class="btn-primary mt-1 w-full py-2.5 sm:w-auto sm:self-start sm:px-6" data-saving-text="Guardando...">
+    Guardar vendedor
+  </button>
+</form>
 {% endif %}
 
 <script>
 (function () {
   const AGENCIA_ID = {{ agencia.id }};
-  const VENDEDOR_ID = {{ (vendedor_activo.id if vendedor_activo else 0)|tojson }};
   const DEFAULT_BOT = {{ nombre_bot_default|tojson }};
   const DEFAULT_AGENCIA = {{ nombre_comercial_actual|tojson }};
   const LOGO_INICIAL = {{ (logo_bot_actual or '')|tojson }};
 
-  const nombreInput = document.getElementById('nombre');
   const botInput = document.getElementById('nombre_bot');
   const comercialInput = document.getElementById('nombre_comercial');
   const colorInput = document.getElementById('color_primario');
@@ -382,8 +409,7 @@
   const logoEstado = document.getElementById('logo-estado');
   const logoEstadoTexto = document.getElementById('logo-estado-texto');
 
-  // Sin vendedor seleccionado no hay formulario que controlar.
-  if (!colorInput || !VENDEDOR_ID) return;
+  if (!colorInput) return;
 
   let logoObjectUrl = null;
   let logoGuardado = LOGO_INICIAL;
@@ -398,39 +424,42 @@
 
   function aplicarColor(hex) {
     document.documentElement.style.setProperty('--brand', hex);
-    colorHex.textContent = hex;
+    if (colorHex) colorHex.textContent = hex;
   }
 
   function actualizarAvatar(src, iniciales) {
+    if (!waAvatarImg || !waIniciales) return;
     if (src) {
       waAvatarImg.src = src;
       waAvatarImg.classList.remove('hidden');
       waIniciales.classList.add('hidden');
-      logoThumb.src = src;
-      logoThumbWrap.classList.remove('hidden');
+      if (logoThumb) logoThumb.src = src;
+      if (logoThumbWrap) logoThumbWrap.classList.remove('hidden');
     } else {
       waAvatarImg.classList.add('hidden');
       waIniciales.classList.remove('hidden');
       waIniciales.textContent = iniciales;
-      logoThumbWrap.classList.add('hidden');
+      if (logoThumbWrap) logoThumbWrap.classList.add('hidden');
     }
   }
 
   function actualizarTextos() {
-    const agencia = (comercialInput.value || '').trim() || DEFAULT_AGENCIA;
-    const bot = (botInput.value || '').trim() || DEFAULT_BOT;
+    if (!previewSaludo || !waContacto) return;
+    const agenciaNombre = (comercialInput && comercialInput.value.trim()) || DEFAULT_AGENCIA;
+    const bot = (botInput && botInput.value.trim()) || DEFAULT_BOT;
     previewSaludo.textContent =
-      'Hola, soy ' + bot + ', tu asesor virtual de ' + agencia + '. ¿En qué puedo ayudarte hoy?';
+      'Hola, soy ' + bot + ', tu asesor virtual de ' + agenciaNombre + '. ¿En qué puedo ayudarte hoy?';
     waContacto.textContent = bot;
     if (!logoGuardado) {
-      actualizarAvatar('', inicialesDe(bot || agencia));
+      actualizarAvatar('', inicialesDe(bot || agenciaNombre));
     }
   }
 
   function setLogoCargando(activo, texto) {
+    if (!logoEstado || !btnSubirLogo) return;
     logoEstado.classList.toggle('hidden', !activo);
     btnSubirLogo.disabled = activo;
-    if (texto) logoEstadoTexto.textContent = texto;
+    if (texto && logoEstadoTexto) logoEstadoTexto.textContent = texto;
   }
 
   async function subirLogo(file) {
@@ -444,18 +473,18 @@
     const fd = new FormData();
     fd.append('archivo_logo', file);
     try {
-      const res = await fetch('/dashboard/' + AGENCIA_ID + '/configuracion/vendedores/' + VENDEDOR_ID + '/logo', { method: 'POST', body: fd });
+      const res = await fetch('/dashboard/' + AGENCIA_ID + '/configuracion/logo', { method: 'POST', body: fd });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || 'error');
       logoGuardado = data.logo_url;
       actualizarAvatar(data.logo_url + '?t=' + Date.now(), '');
-      btnSubirLogoTexto.textContent = file.name;
+      if (btnSubirLogoTexto) btnSubirLogoTexto.textContent = file.name;
       setLogoCargando(true, 'Logo actualizado');
       window.DashboardUI.showToast('Logo actualizado correctamente.');
       setTimeout(function () { setLogoCargando(false); }, 800);
     } catch (_) {
       logoGuardado = '';
-      actualizarAvatar('', inicialesDe((botInput.value || '').trim()));
+      actualizarAvatar('', inicialesDe((botInput && botInput.value.trim()) || ''));
       setLogoCargando(false);
       window.DashboardUI.showToast('No se pudo subir el logo. Usá JPG, PNG o WebP.', 'error');
     }
@@ -465,12 +494,14 @@
   if (botInput) botInput.addEventListener('input', actualizarTextos);
   colorInput.addEventListener('input', function () { aplicarColor(colorInput.value); });
 
-  btnSubirLogo.addEventListener('click', function () { archivoLogo.click(); });
-  archivoLogo.addEventListener('change', function () {
-    const file = archivoLogo.files && archivoLogo.files[0];
-    if (file) subirLogo(file);
-    archivoLogo.value = '';
-  });
+  if (btnSubirLogo && archivoLogo) {
+    btnSubirLogo.addEventListener('click', function () { archivoLogo.click(); });
+    archivoLogo.addEventListener('change', function () {
+      const file = archivoLogo.files && archivoLogo.files[0];
+      if (file) subirLogo(file);
+      archivoLogo.value = '';
+    });
+  }
 
   aplicarColor(colorInput.value);
   actualizarTextos();

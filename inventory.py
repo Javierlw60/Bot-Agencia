@@ -75,48 +75,26 @@ def resolver_destino_por_receptor_whatsapp(
     phone_number_id: str,
 ) -> tuple[Agencia | None, Sucursal | None, Vendedor | None]:
     """
-    Identifica AGENCIA > SUCURSAL > VENDEDOR según la línea receptora.
+    Identifica AGENCIA → SUCURSAL principal → VENDEDOR principal.
 
-    Prioridad de ruteo:
-      1. Vendedor cuya línea (telefono_whatsapp) coincide → su sucursal y agencia.
-      2. Sucursal cuya línea coincide → su vendedor principal.
-      3. Agencia por whatsapp_phone_number_id → sucursal principal → vendedor principal.
-
-    Los teléfonos de vendedor son únicos, así que nunca se mezclan entre sucursales.
+    La línea de WhatsApp Business (Phone Number ID de Meta) pertenece solo a la
+    agencia. Los celulares de vendedores/sucursales no rutean mensajes entrantes.
     """
     db = SessionLocal()
     try:
         normalizado = _normalizar_linea_whatsapp(phone_number_id)
 
-        # 1) Coincidencia directa por línea de vendedor.
-        for vend in db.query(Vendedor).filter(Vendedor.activo.is_(True)).all():
-            tel = vend.telefono_whatsapp or ""
-            if tel == phone_number_id or (
-                normalizado and _normalizar_linea_whatsapp(tel) == normalizado
+        agencia = None
+        for candidata in db.query(Agencia).all():
+            id_ag = (candidata.whatsapp_phone_number_id or "").strip()
+            if not id_ag:
+                continue
+            if id_ag == phone_number_id or (
+                normalizado and _normalizar_linea_whatsapp(id_ag) == normalizado
             ):
-                sucursal = (
-                    db.query(Sucursal).filter(Sucursal.id == vend.sucursal_id).first()
-                )
-                agencia = (
-                    db.query(Agencia).filter(Agencia.id == vend.agencia_id).first()
-                )
-                return agencia, sucursal, vend
+                agencia = candidata
+                break
 
-        # 2) Coincidencia por línea de sucursal (legacy) → vendedor principal.
-        for suc in db.query(Sucursal).all():
-            tel = suc.telefono_whatsapp or ""
-            if tel == phone_number_id or (
-                normalizado and _normalizar_linea_whatsapp(tel) == normalizado
-            ):
-                agencia = db.query(Agencia).filter(Agencia.id == suc.agencia_id).first()
-                return agencia, suc, _vendedor_principal_de_sucursal(db, suc)
-
-        # 3) Fallback por agencia.
-        agencia = (
-            db.query(Agencia)
-            .filter(Agencia.whatsapp_phone_number_id == phone_number_id)
-            .first()
-        )
         if not agencia:
             return None, None, None
 

@@ -38,10 +38,13 @@ def linea_envio_whatsapp_api(
 
     Prioridad:
       1. ID del webhook Meta (metadata.phone_number_id) — siempre válido para enviar.
-      2. agencias.whatsapp_phone_number_id
-      3. vendedor/sucursal solo si no parecen celular 549…
-      4. WHATSAPP_PHONE_NUMBER_ID del .env
+      2. agencias.whatsapp_phone_number_id (línea oficial del bot)
+      3. WHATSAPP_PHONE_NUMBER_ID del .env
+
+    Los celulares de vendedor/sucursal no se usan para enviar por Graph API.
     """
+    del sucursal, vendedor  # compatibilidad de firma; no rutean el envío
+
     candidatos: list[str] = []
 
     if phone_number_id_receptor:
@@ -49,12 +52,6 @@ def linea_envio_whatsapp_api(
 
     if agencia.whatsapp_phone_number_id:
         candidatos.append(agencia.whatsapp_phone_number_id.strip())
-
-    if vendedor and vendedor.telefono_whatsapp:
-        candidatos.append(vendedor.telefono_whatsapp.strip())
-
-    if sucursal and sucursal.telefono_whatsapp:
-        candidatos.append(sucursal.telefono_whatsapp.strip())
 
     env_id = whatsapp_phone_number_id()
     if env_id:
@@ -65,7 +62,7 @@ def linea_envio_whatsapp_api(
             return valor.strip()
 
     for valor in candidatos:
-        if valor:
+        if valor and not parece_celular_argentino(valor):
             return valor.strip()
 
     return ""
