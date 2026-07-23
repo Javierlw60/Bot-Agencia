@@ -1,4 +1,4 @@
-"""Envío de correos de verificación vía Resend.
+"""Envío de correos de verificación vía Resend (SDK oficial).
 
 Variables:
   RESEND_API_KEY  → obligatoria en producción
@@ -6,15 +6,13 @@ Variables:
   DASHBOARD_BASE_URL / APP_URL / FRONTEND_URL → enlace de verificación
 
 Estrategia:
-  1) API HTTPS Resend
-  2) Si falla (p.ej. Cloudflare 1010 desde Render) → SMTP Resend
-     (smtp.resend.com, user=resend, password=RESEND_API_KEY)
+  1) SDK oficial `resend` (pip install resend) — headers correctos p/ Cloudflare
+  2) Si falla → SMTP Resend (smtp.resend.com)
   3) Sin API key → imprime el enlace en logs (solo desarrollo)
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import smtplib
@@ -22,9 +20,6 @@ import ssl
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.utils import formataddr, parseaddr
-from typing import Any
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
 
 from dotenv import load_dotenv
 
@@ -76,54 +71,48 @@ def _armar_mime(destino: str, asunto: str, cuerpo_texto: str, cuerpo_html: str) 
     return msg
 
 
-def _post_json(url: str, payload: dict[str, Any], headers: dict[str, str]) -> dict[str, Any]:
-    data = json.dumps(payload).encode("utf-8")
-    req = Request(url, data=data, headers=headers, method="POST")
-    with urlopen(req, timeout=30) as resp:
-        cuerpo = resp.read().decode("utf-8")
-        return json.loads(cuerpo) if cuerpo else {}
-
-
-def _enviar_por_resend_api(
+def _enviar_por_resend_sdk(
     destino: str, asunto: str, cuerpo_texto: str, cuerpo_html: str, api_key: str
 ) -> bool:
-    payload = {
+    """Usa el SDK oficial (incluye User-Agent y manejo de errores de Cloudflare)."""
+    try:
+        import resend
+    except ImportError:
+        print("[AUTH EMAIL] Falta el paquete 'resend'. Agregalo a requirements.txt.")
+        logger.error("[AUTH EMAIL] Paquete resend no instalado")
+        return False
+
+    resend.api_key = api_key
+    params = {
         "from": _remitente_header(),
         "to": [destino],
         "subject": asunto,
-        "text": cuerpo_texto,
         "html": cuerpo_html,
-    }
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        "User-Agent": "BotAgencias/1.0 (+https://bot-agencias.com.ar)",
+        "text": cuerpo_texto,
     }
     try:
-        data = _post_json("https://api.resend.com/emails", payload, headers)
-        msg_id = data.get("id", "")
+        resultado = resend.Emails.send(params)
+        msg_id = ""
+        if isinstance(resultado, dict):
+            msg_id = str(resultado.get("id") or "")
+        else:
+            msg_id = str(getattr(resultado, "id", "") or "")
         print(
-            f"[AUTH EMAIL] Enviado por Resend API a {destino} "
+            f"[AUTH EMAIL] Enviado por Resend SDK a {destino} "
             f"from={_remitente_email()} id={msg_id}"
         )
-        logger.info("[AUTH EMAIL] Resend API OK destino=%s id=%s", destino, msg_id)
+        logger.info("[AUTH EMAIL] Resend SDK OK destino=%s id=%s", destino, msg_id)
         return True
-    except HTTPError as exc:
-        detalle = exc.read().decode("utf-8", errors="replace")
-        print(f"[AUTH EMAIL] Error Resend API HTTP {exc.code}: {detalle[:500]}")
-        logger.error("[AUTH EMAIL] Resend API HTTP %s: %s", exc.code, detalle[:500])
-        return False
-    except (URLError, Exception) as exc:
-        print(f"[AUTH EMAIL] Error Resend API: {exc}")
-        logger.error("[AUTH EMAIL] Resend API: %s", exc)
+    except Exception as exc:
+        print(f"[AUTH EMAIL] Error Resend SDK: {exc}")
+        logger.error("[AUTH EMAIL] Resend SDK: %s", exc)
         return False
 
 
 def _enviar_por_resend_smtp(
     destino: str, asunto: str, cuerpo_texto: str, cuerpo_html: str, api_key: str
 ) -> bool:
-    """SMTP oficial de Resend: suele funcionar cuando la API HTTPS está bloqueada (CF 1010)."""
+    """SMTP oficial de Resend como respaldo."""
     msg = _armar_mime(destino, asunto, cuerpo_texto, cuerpo_html)
     remitente = _remitente_email()
     try:
@@ -176,19 +165,19 @@ def enviar_correo_verificacion(destino: str, token: str, nombre: str) -> bool:
         return True
 
     print(
-        f"[AUTH EMAIL] Intentando Resend → {destino} "
-        f"from={_remitente_email()} key=***{_resend_api_key()[-4:]}"
+        f"[AUTH EMAIL] Intentando Resend SDK → {destino} "
+        f"from={_remitente_email()} key=***{api_key[-4:]}"
     )
 
-    if _enviar_por_resend_api(destino, asunto, cuerpo_texto, cuerpo_html, api_key):
+    if _enviar_por_resend_sdk(destino, asunto, cuerpo_texto, cuerpo_html, api_key):
         return True
 
-    print("[AUTH EMAIL] API falló; reintentando por SMTP Resend (smtp.resend.com)...")
+    print("[AUTH EMAIL] SDK falló; reintentando por SMTP Resend (smtp.resend.com)...")
     if _enviar_por_resend_smtp(destino, asunto, cuerpo_texto, cuerpo_html, api_key):
         return True
 
     print(
-        "[AUTH EMAIL] Falló API y SMTP de Resend. "
+        "[AUTH EMAIL] Falló SDK y SMTP de Resend. "
         "Revisá: 1) RESEND_API_KEY correcta  2) dominio bot-agencias.com.ar "
         f"verificado en Resend  3) remitente {REMITENTE_DEFAULT}"
     )

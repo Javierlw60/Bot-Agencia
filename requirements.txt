@@ -11,3 +11,4 @@ aiofiles>=24.1.0
 apscheduler>=3.10.4
 bcrypt>=4.2.0
 edge-tts>=6.1.12
+resend>=2.0.0

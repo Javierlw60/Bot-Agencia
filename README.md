@@ -75,7 +75,7 @@ Proveedor: **Resend**. Sin `RESEND_API_KEY` el enlace solo aparece en los logs.
 | `RESEND_API_KEY` | API key de Resend (obligatoria en producción) |
 | `SMTP_FROM` | Remitente; default `noreply@bot-agencias.com.ar` |
 
-En Resend verificá el dominio `bot-agencias.com.ar`. El código intenta la API HTTPS y, si falla (p.ej. bloqueo Cloudflare desde Render), reintenta por `smtp.resend.com`.
+En Resend verificá el dominio `bot-agencias.com.ar`. El envío usa el **SDK oficial** `resend` (con User-Agent correcto). Si falla, reintenta por `smtp.resend.com`.
 
 ### WhatsApp Cloud API (producción)
 
