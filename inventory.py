@@ -237,6 +237,119 @@ def migrar_lineas_bot_desde_equipo() -> int:
         db.close()
 
 
+def _autofix_linea_bot_desde_env(db, phone_number_id: str) -> Agencia | None:
+    """
+    Si Meta manda un Phone Number ID que coincide con WHATSAPP_PHONE_NUMBER_ID
+    del .env y ninguna agencia lo tiene, se asigna a la agencia pendiente (reg_…).
+
+    Multi-tenant: si hay varias con reg_, se elige la de id más bajo (la primera
+    registrada) y se deja registro en logs. Una sola línea WA de plataforma.
+    """
+    from whatsapp_config import whatsapp_phone_number_id
+    from whatsapp_linea import es_phone_number_id_meta
+
+    buscado = _texto_linea(phone_number_id)
+    env_id = _texto_linea(whatsapp_phone_number_id())
+    if not buscado or not env_id:
+        return None
+    if not _lineas_whatsapp_coinciden(buscado, env_id):
+        return None
+    if not es_phone_number_id_meta(buscado):
+        return None
+
+    ya = _buscar_agencia_por_phone_id(db, buscado)
+    if ya:
+        return ya
+
+    placeholders = [
+        a
+        for a in db.query(Agencia).order_by(Agencia.id).all()
+        if _es_placeholder_linea_bot(a.whatsapp_phone_number_id)
+    ]
+    if not placeholders:
+        print(
+            f"[WEBHOOK WA] .env={env_id!r} coincide con el webhook pero ninguna "
+            "agencia tiene línea pendiente (reg_…). Cargá el Phone Number ID en "
+            "Configuración → Datos de la agencia."
+        )
+        return None
+
+    agencia = placeholders[0]
+    if len(placeholders) > 1:
+        print(
+            f"[WEBHOOK WA] Hay {len(placeholders)} agencias con reg_…; "
+            f"se asigna la línea {buscado!r} a la más antigua "
+            f"id={agencia.id} ({agencia.nombre!r})."
+        )
+    else:
+        print(
+            f"[WEBHOOK WA] Auto-fix desde .env: se asigna Phone Number ID {buscado!r} "
+            f"a agencia id={agencia.id} ({agencia.nombre!r})."
+        )
+    return _asignar_linea_bot_a_agencia(db, agencia, buscado)
+
+
+def migrar_linea_bot_desde_env() -> bool:
+    """Al arrancar: si .env tiene Phone Number ID y nadie lo tiene, asignarlo."""
+    from whatsapp_config import whatsapp_phone_number_id
+    from whatsapp_linea import es_phone_number_id_meta
+
+    env_id = _texto_linea(whatsapp_phone_number_id())
+    if not env_id or not es_phone_number_id_meta(env_id):
+        return False
+
+    db = SessionLocal()
+    try:
+        if _buscar_agencia_por_phone_id(db, env_id):
+            return False
+        placeholders = [
+            a
+            for a in db.query(Agencia).order_by(Agencia.id).all()
+            if _es_placeholder_linea_bot(a.whatsapp_phone_number_id)
+        ]
+        if not placeholders:
+            return False
+        agencia = placeholders[0]
+        _asignar_linea_bot_a_agencia(db, agencia, env_id)
+        print(
+            f"[DB] Línea del bot tomada de .env → agencia id={agencia.id} "
+            f"({agencia.nombre!r}) = {env_id}"
+        )
+        return True
+    finally:
+        db.close()
+
+
+def asegurar_linea_bot_para_agencia(db, agencia: Agencia) -> bool:
+    """
+    Al abrir Configuración: si esta agencia todavía tiene reg_… y el .env tiene
+    un Phone Number ID libre, se lo asigna a ESTA agencia (la que el usuario
+    está editando).
+    """
+    from whatsapp_config import whatsapp_phone_number_id
+    from whatsapp_linea import es_phone_number_id_meta
+
+    if not _es_placeholder_linea_bot(agencia.whatsapp_phone_number_id):
+        return False
+    env_id = _texto_linea(whatsapp_phone_number_id())
+    if not env_id or not es_phone_number_id_meta(env_id):
+        return False
+    otra = _buscar_agencia_por_phone_id(db, env_id)
+    if otra and otra.id != agencia.id:
+        return False
+    _asignar_linea_bot_a_agencia(db, agencia, env_id)
+    return True
+
+
+def promover_phone_id_a_agencia(db, agencia: Agencia, phone_number_id: str) -> Agencia:
+    """API pública: guarda el Phone Number ID de Meta en la agencia y limpia el equipo."""
+    return _asignar_linea_bot_a_agencia(db, agencia, phone_number_id)
+
+
+def agencia_tiene_linea_placeholder(agencia: Agencia) -> bool:
+    return _es_placeholder_linea_bot(agencia.whatsapp_phone_number_id)
+
+
 def _sucursal_y_vendedor_de_agencia(
     db, agencia: Agencia
 ) -> tuple[Sucursal | None, Vendedor | None]:
@@ -262,8 +375,10 @@ def resolver_destino_por_receptor_whatsapp(
     """
     Identifica AGENCIA → SUCURSAL principal → VENDEDOR principal.
 
-    La línea de WhatsApp Business (Phone Number ID de Meta) pertenece solo a la
-    agencia. Si quedó mal cargada en un vendedor/sucursal, se auto-repara.
+    Orden de resolución:
+      1) agencias.whatsapp_phone_number_id
+      2) auto-fix desde vendedor/sucursal (modelo viejo)
+      3) auto-fix desde .env WHATSAPP_PHONE_NUMBER_ID
     """
     buscado = _texto_linea(phone_number_id)
     if not buscado:
@@ -274,8 +389,9 @@ def resolver_destino_por_receptor_whatsapp(
         agencia = _buscar_agencia_por_phone_id(db, buscado)
         if not agencia:
             agencia = _autofix_linea_bot_desde_equipo(db, buscado)
+        if not agencia:
+            agencia = _autofix_linea_bot_desde_env(db, buscado)
         elif _equipo_tiene_phone_id(db, agencia.id, buscado):
-            # La agencia ya tiene la línea; limpia duplicados residuales en el equipo.
             _liberar_phone_id_en_equipo(db, agencia.id, buscado)
             db.commit()
             db.refresh(agencia)
@@ -283,7 +399,6 @@ def resolver_destino_por_receptor_whatsapp(
         if not agencia:
             return None, None, None
 
-        # Materializar atributos antes de cerrar la sesión (evitar DetachedInstance).
         _ = (
             agencia.id,
             agencia.nombre,

@@ -34,7 +34,9 @@ def _token() -> str:
 
 
 def _normalizar_telefono(telefono: str) -> str:
-    return re.sub(r"\D", "", telefono.strip())
+    from whatsapp_linea import normalizar_celular_destino_wa
+
+    return normalizar_celular_destino_wa(telefono)
 
 
 def _post_json(url: str, payload: dict[str, Any], token: str) -> dict[str, Any]:
