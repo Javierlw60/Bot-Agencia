@@ -11,7 +11,7 @@ MODOS_RESPUESTA_VALIDOS = {
 ETIQUETAS_MODO_RESPUESTA = {
     MODO_RESPUESTA_TEXTO: "Solo texto",
     MODO_RESPUESTA_VOZ: "Solo voz",
-    MODO_RESPUESTA_AMBAS: "Texto y voz",
+    MODO_RESPUESTA_AMBAS: "Automático (audio↔voz, texto↔texto)",
 }
 
 

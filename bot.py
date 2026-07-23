@@ -13,6 +13,12 @@ from google.genai import errors as genai_errors
 from google.genai import types
 
 from citas import (
+    _buscar_cita_activa_sesion,
+    _extraer_fecha_hora_para_actualizar,
+    _extraer_hora_explicita,
+    _normalizar as _normalizar_cita,
+    actualizar_hora_cita,
+    detectar_cambio_horario,
     detectar_visita,
     es_horario_madrugada,
     obtener_ahora_argentina,
@@ -202,7 +208,7 @@ def _entregar_respuesta_whatsapp(
     via_whatsapp: bool = False,
     sesion: SesionCliente | None = None,
 ) -> None:
-    """Muestra la respuesta en consola y/o la envía por WhatsApp (texto/voz/ambas)."""
+    """Muestra la respuesta en consola y/o la envía por WhatsApp (una sola modalidad)."""
     if not via_whatsapp:
         print("\nBot:", texto)
     sucursal = _sucursal_sesion_bot(sesion) if sesion else None
@@ -213,14 +219,15 @@ def _entregar_respuesta_whatsapp(
         sucursal=sucursal,
         vendedor=vendedor,
     )
-    # Espejo de modalidad: audio in → voz; texto in → texto.
-    # "ambas" en la agencia manda texto+voz siempre.
+    # UNA sola entrega por turno (nunca texto+audio juntos: molesta y duplica).
+    # Audio in → solo voz. Texto in → texto (o voz si la agencia está en "voz").
     modo_agencia = (agencia.modo_respuesta or "texto").strip().lower()
-    if modo_agencia == "ambas":
-        modo = "ambas"
-    elif sesion and sesion.entrada_fue_audio:
+    if sesion and sesion.entrada_fue_audio:
+        modo = "voz"
+    elif modo_agencia == "voz":
         modo = "voz"
     else:
+        # "texto" y "ambas" → una sola respuesta en texto cuando el cliente escribió.
         modo = "texto"
 
     enviar_respuesta_bot(
@@ -654,6 +661,50 @@ def _respuesta_direccion_agencia(agencia: Agencia, sesion: SesionCliente) -> str
     )
 
 
+def _respuesta_rapida_reprogramacion(
+    sesion: SesionCliente,
+    agencia: Agencia,
+    texto: str,
+) -> str | None:
+    """
+    Si el cliente solo pide cambiar la hora de una cita existente, actualiza la BD
+    y responde corto (sin Gemini): evita disculpas largas y hora inventada.
+    """
+    if not detectar_cambio_horario(texto):
+        return None
+    if _tiene_consulta_comercial(_normalizar_texto(texto)):
+        return None
+
+    hora = _extraer_hora_explicita(_normalizar_cita(texto))
+    if hora is None:
+        return None
+
+    cita = _buscar_cita_activa_sesion(sesion)
+    if not cita:
+        return None
+
+    fecha_hora = _extraer_fecha_hora_para_actualizar(texto, sesion.historial, cita)
+    if not fecha_hora:
+        return None
+
+    fecha_cita, hora_cita = fecha_hora
+    actualizar_hora_cita(cita.id, fecha_cita, hora_cita)
+    sesion.cita_registrada_id = cita.id
+
+    dia = _DIAS_ES[fecha_cita.weekday()]
+    mes = _MESES_ES[fecha_cita.month - 1]
+    fecha_txt = f"{dia} {fecha_cita.day} de {mes}"
+    hora_txt = hora_cita.strftime("%H:%M")
+
+    sucursal = _sucursal_sesion_bot(sesion)
+    direccion = obtener_direccion_bot(agencia, sucursal)
+    extra = f" en {direccion}" if direccion else ""
+    return (
+        f"Listo, tu visita quedó para el {fecha_txt} a las {hora_txt} hs{extra}. "
+        "Te esperamos."
+    )
+
+
 def _enviar_bienvenida_inicial(
     sesion: SesionCliente,
     agencia: Agencia,
@@ -872,7 +923,7 @@ def _generar_respuesta_gemini(
     contents = _historial_a_contents(historial)
     config = types.GenerateContentConfig(
         system_instruction=prompt_sistema,
-        temperature=0.7,
+        temperature=0.4,
     )
 
     intento = 0
@@ -962,11 +1013,9 @@ def _construir_directiva_vendedor(agencia: Agencia, sesion: SesionCliente) -> st
         f"{agencia.prompt_personalizado or ''}\n"
         f"{contexto_cliente}{contexto_sucursal}{contexto_usado}{contexto_fotos}\n"
         f"{INSTRUCCIONES_PERMUTA}\n"
-        "PERSONALIDAD CRÍTICA: Actuá como un vendedor de autos usados argentino, rápido, ágil, "
-        "canchero y con mucha calle. Si el cliente te da una señal de compra clara (ej: 'tengo la plata'), "
-        "asumí el cierre de inmediato, poné presión de escasez (ej: 'te congelo la llave') y llevalo "
-        "derecho a coordinar el día y hora (mañana o tarde) para que visite la agencia. "
-        "No repitas speeches robóticos ni ofrezcas financiación si te dijeron que tienen el efectivo. Sé vivo. "
+        "PERSONALIDAD: vendedor argentino de usados, ágil y canchero, SIN teatro. "
+        "Respuestas cortas (1-3 oraciones). Si el cliente da señal de compra, cerrá visita "
+        "con día y hora concretos. No repitas speeches ni te disculpes de más. "
         "Usá el nombre del cliente cuando lo tengas."
     )
 
@@ -1055,6 +1104,16 @@ def _procesar_mensaje(
             agencia, sesion.telefono, respuesta_bot, via_whatsapp=via_whatsapp, sesion=sesion
         )
         return respuesta_bot
+
+    # Reprogramar cita con hora explícita: una sola confirmación corta (sin Gemini).
+    respuesta_repro = _respuesta_rapida_reprogramacion(sesion, agencia, texto)
+    if respuesta_repro:
+        sesion.historial.append(f"Bot: {respuesta_repro}")
+        _persistir_mensaje(sesion, "bot", respuesta_repro)
+        _entregar_respuesta_whatsapp(
+            agencia, sesion.telefono, respuesta_repro, via_whatsapp=via_whatsapp, sesion=sesion
+        )
+        return respuesta_repro
 
     inventario = obtener_inventario_agencia(sesion.agencia_id)
     directivas = _construir_directiva_vendedor(agencia, sesion)
