@@ -352,6 +352,91 @@ def _ampliar_varchar_si_corta(
             )
 
 
+def _migrar_supabase_rls() -> None:
+    """
+    Habilita RLS en tablas public (aviso Supabase rls_disabled_in_public).
+
+    - anon/authenticated quedan sin acceso por PostgREST.
+    - service_role tiene política FOR ALL (Edge Functions / Admin).
+    - El backend con DATABASE_URL (rol postgres/pooler) sigue con BYPASSRLS.
+    """
+    if not es_postgres():
+        return
+
+    sql_habilitar = text(
+        """
+        DO $rls$
+        DECLARE
+          r RECORD;
+          policy_name text := 'service_role_full_access';
+        BEGIN
+          BEGIN
+            EXECUTE 'REVOKE ALL ON ALL TABLES IN SCHEMA public FROM anon, authenticated';
+            EXECUTE 'REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM anon, authenticated';
+          EXCEPTION WHEN undefined_object THEN
+            NULL;
+          END;
+
+          BEGIN
+            EXECUTE 'GRANT USAGE ON SCHEMA public TO service_role';
+            EXECUTE 'GRANT ALL ON ALL TABLES IN SCHEMA public TO service_role';
+            EXECUTE 'GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO service_role';
+          EXCEPTION WHEN undefined_object THEN
+            NULL;  -- fuera de Supabase no existe service_role
+          END;
+
+          FOR r IN
+            SELECT c.relname AS tablename
+            FROM pg_class c
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = 'public'
+              AND c.relkind = 'r'
+            ORDER BY c.relname
+          LOOP
+            EXECUTE format(
+              'ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY',
+              r.tablename
+            );
+
+            BEGIN
+              IF EXISTS (
+                SELECT 1 FROM pg_policies
+                WHERE schemaname = 'public'
+                  AND tablename = r.tablename
+                  AND policyname = policy_name
+              ) THEN
+                EXECUTE format(
+                  'DROP POLICY %I ON public.%I',
+                  policy_name,
+                  r.tablename
+                );
+              END IF;
+
+              EXECUTE format(
+                'CREATE POLICY %I ON public.%I
+                   FOR ALL TO service_role
+                   USING (true) WITH CHECK (true)',
+                policy_name,
+                r.tablename
+              );
+            EXCEPTION WHEN undefined_object THEN
+              NULL;
+            END;
+          END LOOP;
+        END
+        $rls$;
+        """
+    )
+
+    try:
+        with engine.begin() as conn:
+            conn.execute(sql_habilitar)
+        print("[DB] RLS habilitado en tablas public (Supabase).")
+    except Exception as exc:
+        print(f"[DB] No se pudo aplicar RLS automáticamente: {exc}")
+        print("[DB] Ejecutá a mano sql/supabase_rls.sql en el SQL Editor de Supabase.")
+
+
 def inicializar_base_de_datos():
     Base.metadata.create_all(bind=engine)
     _migrar_columnas_leads()
@@ -379,6 +464,7 @@ def inicializar_base_de_datos():
         asegurar_tabla_idempotencia_whatsapp()
     except Exception as exc:
         print(f"[DB] Idempotencia WhatsApp: {exc}")
+    _migrar_supabase_rls()
 
 
 def _migrar_lineas_bot_a_agencia() -> None:
