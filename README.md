@@ -66,6 +66,11 @@ En Render el disco del servicio es **efímero**: un redeploy borra SQLite local 
 
 Sin `DATABASE_URL`, en local se usa SQLite (`bot_agencias_multitenant.db`).
 
+**Seguridad Supabase (RLS):** el aviso `rls_disabled_in_public` se corrige habilitando Row Level Security.
+Al arrancar, la app aplica la migración automáticamente en Postgres. También podés ejecutar a mano
+`sql/supabase_rls.sql` en el SQL Editor de Supabase. El backend (Render + `DATABASE_URL`) sigue
+funcionando porque el rol de conexión bypassa RLS; `anon`/`authenticated` quedan sin acceso por API.
+
 ### Correo de verificación (registro)
 
 Proveedor: **Resend**. Sin `RESEND_API_KEY` el enlace solo aparece en los logs.
